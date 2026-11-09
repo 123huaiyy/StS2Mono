@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 # Builds StS2Mono.dylib (Mono runtime + AOT-compiled CoreLib + bridge) for iOS
 # arm64 and collects the matching base class library. Needs macOS with Xcode.
 # No game files are involved.

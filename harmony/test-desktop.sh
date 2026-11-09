@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 # Runs harmony/HarmonyTest on StS2Mono's Mono build for macOS arm64, with every
 # method interpreted and no inlining, as the game runs on iOS.
 # Usage: harmony/test-desktop.sh <mono/build-mono.sh osx output> <harmony/build.sh output>

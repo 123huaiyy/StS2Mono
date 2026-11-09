@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 # Builds Mono from dotnet/runtime with StS2Mono's patches (patch-mono.ps1).
 # Needs macOS with Xcode, git and PowerShell (pwsh).
 #

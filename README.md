@@ -1,4 +1,4 @@
- StS2Mono
+# StS2Mono
 
 让杀戮尖塔2 iOS 移植版改用 Mono 解释器运行游戏的 C# 代码，而不是打包时的 NativeAOT 版本，这样游戏自带的 mod 加载器就能加载 dll 模组，包括用 Harmony 打补丁的模组。
 

@@ -1,4 +1,4 @@
-/ Checks that Harmony patches work through StS2Mono's interpreter redirect.
+// Checks that Harmony patches work through StS2Mono's interpreter redirect.
 // harmony/test-desktop.sh runs it on StS2Mono's Mono build for macOS with
 // everything interpreted and inlining off, the way the game runs on iOS.
 // Prints PASS/FAIL for each check; the exit code is 1 if any check failed.

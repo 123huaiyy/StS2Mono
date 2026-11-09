@@ -1,4 +1,4 @@
-aram(
+param(
     [Parameter(Mandatory = $true)][string]$RuntimeRoot   # a dotnet/runtime checkout at tag v9.0.22
 )
 

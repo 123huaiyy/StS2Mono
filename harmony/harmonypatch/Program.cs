@@ -1,4 +1,4 @@
-/ Points Harmony at StS2Mono's interpreter redirect instead of MonoMod.Core,
+// Points Harmony at StS2Mono's interpreter redirect instead of MonoMod.Core,
 // whose native detours need writable machine code that iOS doesn't allow.
 //
 // In Harmony 2.4.2 only two methods reach MonoMod.Core (`scan` lists them):

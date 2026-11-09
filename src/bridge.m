@@ -1,4 +1,4 @@
-/ StS2Mono: runs the C# code of the Slay the Spire 2 iOS port on Mono instead
+// StS2Mono: runs the C# code of the Slay the Spire 2 iOS port on Mono instead
 // of its NativeAOT build, so that the game's own mod loader can load DLL mods.
 //
 // How it hooks in: the port's engine is the official Godot 4.5.1 template. When

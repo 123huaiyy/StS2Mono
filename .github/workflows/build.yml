@@ -1,4 +1,4 @@
-ame: Build StS2Mono
+name: Build StS2Mono
 
 on:
   push:

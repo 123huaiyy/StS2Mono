@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 # Builds StS2Mono.Harmony.dll and rewrites Lib.Harmony's 0Harmony.dll to use it
 # (see harmonypatch/Program.cs). The game ships this exact 0Harmony.dll.
 # Usage: harmony/build.sh <output dir>

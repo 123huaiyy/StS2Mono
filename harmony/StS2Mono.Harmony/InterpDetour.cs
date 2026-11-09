@@ -1,4 +1,4 @@
-/ Applies Harmony patches through Mono's interpreter.
+// Applies Harmony patches through Mono's interpreter.
 //
 // Harmony normally makes a patched method jump to the replacement it generates
 // by rewriting the method's machine code (MonoMod.Core detours). On iOS the game's
