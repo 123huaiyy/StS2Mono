@@ -11,9 +11,14 @@
 // interpreter on the IL assemblies in Documents/dotnet.
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <fcntl.h>
+#include <mach/mach.h>
+#include <os/proc.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +81,157 @@ static void mono_log(const char *domain, const char *level, const char *message,
         blog("fatal Mono error, aborting");
         abort();
     }
+}
+
+// ---- Crash and memory diagnostics -------------------------------------------
+// Unless "Share iPhone Analytics" is on, iOS keeps no crash reports, so the
+// bridge records crashes itself. The signal handler is installed after Mono's,
+// so it runs first; it writes with async-signal-safe calls only and then hands
+// the signal on, so Mono still turns faults in managed code into exceptions.
+
+static struct sigaction previous_actions[NSIG];
+static const int crash_signals[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS };
+static volatile sig_atomic_t crash_reports;
+static NSUncaughtExceptionHandler *previous_exception_handler;
+
+static void raw_write(int fd, const char *s) {
+    size_t len = strlen(s);
+    while (len > 0) {
+        ssize_t n = write(fd, s, len);
+        if (n <= 0)
+            return;
+        s += n;
+        len -= (size_t)n;
+    }
+}
+
+static void raw_hex(int fd, uint64_t v) {
+    char buf[19] = "0x";
+    for (int i = 0; i < 16; i++) {
+        int d = (int)((v >> ((15 - i) * 4)) & 0xF);
+        buf[2 + i] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+    }
+    buf[18] = 0;
+    raw_write(fd, buf);
+}
+
+static void raw_dec(int fd, long v) {
+    char buf[24];
+    int i = 23;
+    buf[i] = 0;
+    unsigned long u = v < 0 ? (unsigned long)(-v) : (unsigned long)v;
+    do {
+        buf[--i] = (char)('0' + u % 10);
+        u /= 10;
+    } while (u && i > 1);
+    if (v < 0)
+        buf[--i] = '-';
+    raw_write(fd, buf + i);
+}
+
+static void crash_handler(int sig, siginfo_t *info, void *context) {
+    int fd = log_file ? fileno(log_file) : -1;
+    if (fd >= 0 && crash_reports < 10) {
+        crash_reports++;
+        raw_write(fd, "\n===== signal ");
+        raw_dec(fd, sig);
+        raw_write(fd, " code ");
+        raw_dec(fd, info ? info->si_code : 0);
+        raw_write(fd, " fault address ");
+        raw_hex(fd, (uint64_t)(uintptr_t)(info ? info->si_addr : NULL));
+        raw_write(fd, pthread_main_np() ? " on the main thread\n" : " on a secondary thread\n");
+#if defined(__arm64__)
+        ucontext_t *uc = (ucontext_t *)context;
+        if (uc && uc->uc_mcontext) {
+            raw_write(fd, "pc ");
+            raw_hex(fd, uc->uc_mcontext->__ss.__pc);
+            raw_write(fd, " lr ");
+            raw_hex(fd, uc->uc_mcontext->__ss.__lr);
+            raw_write(fd, " sp ");
+            raw_hex(fd, uc->uc_mcontext->__ss.__sp);
+            raw_write(fd, " fp ");
+            raw_hex(fd, uc->uc_mcontext->__ss.__fp);
+            raw_write(fd, "\n");
+        }
+#endif
+        void *frames[64];
+        int count = backtrace(frames, 64);
+        backtrace_symbols_fd(frames, count, fd);
+        raw_write(fd, "===== end of signal report\n");
+    }
+
+    struct sigaction *prev = &previous_actions[sig];
+    if (prev->sa_flags & SA_SIGINFO) {
+        if (prev->sa_sigaction) {
+            prev->sa_sigaction(sig, info, context);
+            return;
+        }
+    } else if (prev->sa_handler == SIG_IGN) {
+        return;
+    } else if (prev->sa_handler != SIG_DFL && prev->sa_handler != NULL) {
+        prev->sa_handler(sig);
+        return;
+    }
+    // Default action: restore it and let the signal end the process.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void uncaught_exception(NSException *exception) {
+    blog("uncaught Objective-C exception %s: %s\n%s", exception.name.UTF8String, exception.reason.UTF8String,
+         [exception.callStackSymbols componentsJoinedByString:@"\n"].UTF8String);
+    if (previous_exception_handler)
+        previous_exception_handler(exception);
+}
+
+static void install_crash_logger(void) {
+    for (size_t i = 0; i < sizeof crash_signals / sizeof crash_signals[0]; i++) {
+        int sig = crash_signals[i];
+        struct sigaction sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sa_sigaction = crash_handler;
+        sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigemptyset(&sa.sa_mask);
+        sigaction(sig, &sa, &previous_actions[sig]);
+    }
+    previous_exception_handler = NSGetUncaughtExceptionHandler();
+    NSSetUncaughtExceptionHandler(&uncaught_exception);
+    blog("crash logger installed");
+}
+
+static unsigned long long footprint_mb(void) {
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) != KERN_SUCCESS)
+        return 0;
+    return info.phys_footprint >> 20;
+}
+
+static void *memory_monitor(void *arg) {
+    pthread_setname_np("StS2Mono memory");
+    for (;;) {
+        blog("memory: footprint %llu MB, %zu MB left before iOS ends the app", footprint_mb(),
+             os_proc_available_memory() >> 20);
+        sleep(10);
+    }
+    return NULL;
+}
+
+static void log_exit(void) {
+    blog("process is exiting normally");
+}
+
+static void start_memory_diagnostics(void) {
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
+                                                      object:nil
+                                                       queue:nil
+                                                  usingBlock:^(NSNotification *note) {
+        blog("iOS memory warning: footprint %llu MB, %zu MB left", footprint_mb(), os_proc_available_memory() >> 20);
+    }];
+    atexit(log_exit);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, memory_monitor, NULL) == 0)
+        pthread_detach(thread);
 }
 
 static int sym_cmp(const void *key, const void *elem) {
@@ -188,8 +344,11 @@ int coreclr_create_delegate(void *hostHandle, unsigned int domainId,
     blog("coreclr_create_delegate(%s, %s, %s)", assemblyName, typeName, methodName);
     int rc = monovm_create_delegate(assemblyName, typeName, methodName, delegate);
     blog("monovm_create_delegate -> 0x%x, entry point %p", rc, delegate ? *delegate : NULL);
-    if (rc == 0)
+    if (rc == 0) {
         blog("Mono is now running the game's C# code");
+        // Mono installed its signal handlers while starting; ours go in front.
+        install_crash_logger();
+    }
     return rc;
 }
 
@@ -254,6 +413,7 @@ static void bridge_load(void) {
             return;
         }
         blog("linked %s to this dylib", probe.UTF8String);
+        start_memory_diagnostics();
 
         // Keep stdout/stderr (Mono's own messages, Console.WriteLine) for debugging.
         NSString *console = [dotnet stringByAppendingPathComponent:@"console.log"];
