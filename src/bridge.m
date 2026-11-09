@@ -28,6 +28,7 @@
 
 #include <mono/jit/jit.h>
 #include <mono/metadata/mono-debug.h>
+#include <mono/metadata/mono-gc.h>
 #include <mono/utils/mono-logger.h>
 
 #ifndef BRIDGE_VERSION
@@ -346,6 +347,12 @@ int coreclr_create_delegate(void *hostHandle, unsigned int domainId,
     blog("monovm_create_delegate -> 0x%x, entry point %p", rc, delegate ? *delegate : NULL);
     if (rc == 0) {
         blog("Mono is now running the game's C# code");
+        // The iOS runtime is built with LAZY_GC_THREAD_CREATION, so the host
+        // has to start the finalizer thread. Without it no finalizer ever runs,
+        // and every Godot object held by a dead C# wrapper (textures, tweens,
+        // ...) stays allocated until iOS ends the app.
+        mono_gc_init_finalizer_thread();
+        blog("finalizer thread started");
         // Mono installed its signal handlers while starting; ours go in front.
         install_crash_logger();
     }
