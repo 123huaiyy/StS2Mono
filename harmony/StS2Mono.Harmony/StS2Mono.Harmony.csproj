@@ -1,0 +1,11 @@
+Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>StS2Mono.Harmony</AssemblyName>
+    <RootNamespace>StS2Mono</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+</Project>

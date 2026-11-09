@@ -1,23 +1,116 @@
-name: Build StS2Mono
+ame: Build StS2Mono
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+# Queue rather than cancel: a cancelled run would throw away a long Mono build
+# before it reaches the cache.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NET_VERSION: 9.0.22
+  DOTNET_RUNTIME_TAG: v9.0.22
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
 jobs:
-  build:
-    runs-on: macos-latest
+  # Mono with StS2Mono's patches, built once per change to mono/ and cached.
+  mono-ios:
+    runs-on: macos-15
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: mono-out
+          key: mono-ios-arm64-${{ env.DOTNET_RUNTIME_TAG }}-${{ hashFiles('mono/**') }}
+      - name: Build Mono for iOS
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash mono/build-mono.sh ios mono-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mono-ios-arm64
+          path: mono-out/
+          retention-days: 7
 
+  mono-osx:
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: mono-out
+          key: mono-osx-arm64-${{ env.DOTNET_RUNTIME_TAG }}-${{ hashFiles('mono/**') }}
+      - name: Build Mono for macOS
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash mono/build-mono.sh osx mono-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mono-osx-arm64
+          path: mono-out/
+          retention-days: 7
+
+  harmony:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Build StS2Mono.Harmony and patch 0Harmony
+        run: bash harmony/build.sh out-harmony
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harmony
+          path: out-harmony/
+
+  # Harmony patches through the interpreter redirect, on desktop Mono.
+  harmony-test:
+    needs: [mono-osx, harmony]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: mono-osx-arm64
+          path: mono-osx
+      - uses: actions/download-artifact@v4
+        with:
+          name: harmony
+          path: out-harmony
+      - name: Run the Harmony test on interpreted Mono
+        run: bash harmony/test-desktop.sh mono-osx out-harmony
+
+  bridge:
+    needs: [mono-ios, harmony]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mono-ios-arm64
+          path: mono-ios
+      - uses: actions/download-artifact@v4
+        with:
+          name: harmony
+          path: out-harmony
       - name: Build
         run: bash build.sh
         env:
           BRIDGE_VERSION: ${{ github.run_number }}
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
+          MONO_BUILD: mono-ios
+          HARMONY_OUT: out-harmony
+      - uses: actions/upload-artifact@v4
         with:
           name: StS2Mono
           path: out/
