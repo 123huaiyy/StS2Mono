@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include <mono/jit/jit.h>
+#include <mono/metadata/mono-debug.h>
 #include <mono/utils/mono-logger.h>
 
 #ifndef BRIDGE_VERSION
@@ -160,6 +161,13 @@ int coreclr_initialize(const char *exePath, const char *appDomainFriendlyName,
         mono_trace_set_mask_string("asm,aot,dll,cfg");
     mono_set_signal_chaining(1);
     mono_set_crash_chaining(1);
+
+    // Read the .pdb files next to the assemblies, so exception stack traces
+    // carry file names and line numbers.
+    mono_debug_init(MONO_DEBUG_FORMAT_MONO);
+    // No inlining in the interpreter: every call keeps its own stack frame, and
+    // a redirected (patched) method can't be bypassed by an inlined copy.
+    setenv("MONO_INTERPRETER_OPTIONS", "-inline", 1);
 
     mono_aot_register_module((void **)mono_aot_module_System_Private_CoreLib_info);
     mono_jit_set_aot_mode(MONO_AOT_MODE_INTERP);
