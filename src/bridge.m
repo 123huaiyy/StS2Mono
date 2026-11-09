@@ -384,15 +384,28 @@ static void bridge_load(void) {
         if (!first || !info.dli_fname)
             return;
 
-        // What the original StS2Mod.dylib did: the game looks for mods next to its executable.
+        // What the original StS2Mod.dylib did: the game looks for mods next to its
+        // executable. The link holds an absolute path and LiveContainer's data
+        // folder can move, so it is checked and remade on every launch.
         NSString *mods = [docs stringByAppendingPathComponent:@"mods"];
         NSString *appMods = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"mods"];
         [fm createDirectoryAtPath:mods withIntermediateDirectories:YES attributes:nil error:nil];
         NSError *err = nil;
-        if (![fm destinationOfSymbolicLinkAtPath:appMods error:nil] && ![fm fileExistsAtPath:appMods]) {
-            if (![fm createSymbolicLinkAtPath:appMods withDestinationPath:mods error:&err])
+        NSString *linked = [fm destinationOfSymbolicLinkAtPath:appMods error:nil];
+        if (linked && ![linked isEqualToString:mods]) {
+            blog("mods link pointed to %s, relinking", linked.UTF8String);
+            [fm removeItemAtPath:appMods error:nil];
+            linked = nil;
+        }
+        if (!linked) {
+            if ([fm fileExistsAtPath:appMods])
+                blog("%s is a real folder, so the game reads mods from there", appMods.UTF8String);
+            else if (![fm createSymbolicLinkAtPath:appMods withDestinationPath:mods error:&err])
                 blog("could not link %s: %s", appMods.UTF8String, err.localizedDescription.UTF8String);
         }
+        NSArray<NSString *> *modEntries = [fm contentsOfDirectoryAtPath:mods error:nil];
+        blog("mods folder %s has %lu entries: %s", mods.UTF8String, (unsigned long)modEntries.count,
+             [modEntries componentsJoinedByString:@", "].UTF8String);
 
         // Point Godot's runtime probe at this dylib, or remove the link so the game uses NativeAOT.
         NSString *dataDir = [caches stringByAppendingPathComponent:@"data_sts2_ios_arm64"];
