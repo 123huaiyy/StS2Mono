@@ -7,11 +7,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- The 0Harmony.dll written by harmonypatch (harmony/build.sh). -->
-    <HarmonyPath Condition="'$(HarmonyPath)' == ''">$(MSBuildThisFileDirectory)../../out-harmony/0Harmony.dll</HarmonyPath>
+    <!-- The output of harmony/build.sh: the rewritten 0Harmony.dll and the adapter it calls. -->
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">$(MSBuildThisFileDirectory)../../out-harmony/</HarmonyDir>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="0Harmony" HintPath="$(HarmonyPath)" />
-    <ProjectReference Include="../StS2Mono.Harmony/StS2Mono.Harmony.csproj" />
+    <Reference Include="0Harmony" HintPath="$(HarmonyDir)0Harmony.dll" />
+    <Reference Include="StS2Mono.Harmony" HintPath="$(HarmonyDir)StS2Mono.Harmony.dll" />
   </ItemGroup>
 </Project>

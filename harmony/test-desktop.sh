@@ -14,8 +14,7 @@ rm -rf "$APP"
 # A self-contained CoreCLR app, then Mono swapped in: the class libraries and
 # their native helpers are the same for both runtimes, CoreLib is not.
 dotnet publish "$ROOT/harmony/HarmonyTest/HarmonyTest.csproj" -c Release -r osx-arm64 --self-contained \
-    -p:RuntimeFrameworkVersion="$NET_VERSION" -p:HarmonyPath="$HARMONY_OUT/0Harmony.dll" -o "$APP" --nologo
-cp "$HARMONY_OUT/0Harmony.dll" "$APP/"
+    -p:RuntimeFrameworkVersion="$NET_VERSION" -p:HarmonyDir="$HARMONY_OUT/" -o "$APP" --nologo
 cp "$MONO_BUILD/libcoreclr.dylib" "$APP/libcoreclr.dylib"
 cp "$MONO_BUILD/System.Private.CoreLib.dll" "$APP/System.Private.CoreLib.dll"
 

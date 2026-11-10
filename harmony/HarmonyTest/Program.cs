@@ -84,6 +84,13 @@ namespace StS2Mono.HarmonyTest
         public T Get() => value;
     }
 
+    // A target this game build doesn't have: PatchAll must skip it and go on.
+    [HarmonyPatch(typeof(Targets), "MethodFromANewerVersion")]
+    internal static class MissingTargetPatch
+    {
+        private static void Prefix() { }
+    }
+
     [HarmonyPatch(typeof(Targets), nameof(Targets.Square))]
     internal static class SquarePatch
     {
@@ -267,6 +274,7 @@ namespace StS2Mono.HarmonyTest
                 return 1;
             }
 
+            Check("patch class with a missing target skipped", () => InterpDetour.SkippedPatchClasses, 1);
             Check("static method, prefix changes an argument", () => Targets.Square(3), 16);
             Check("delegate made before patching", () => squareBeforePatching(3), 16);
             Check("reflection invoke", () => typeof(Targets).GetMethod(nameof(Targets.Square))!.Invoke(null, new object[] { 3 }), 16);

@@ -54,6 +54,22 @@ namespace StS2Mono
             Console.WriteLine($"[StS2Mono] patched {Describe(original)}");
         }
 
+        /// <summary>Patch classes that Harmony.PatchAll skipped because they failed.</summary>
+        public static int SkippedPatchClasses { get; private set; }
+
+        /// <summary>Called by Harmony.PatchAll (rewritten by harmonypatch) when one patch class
+        /// fails. Harmony would stop there and leave the rest of the mod unpatched; mods built
+        /// for a newer game often target a few methods this one lacks, so the class is skipped
+        /// and the others still get patched.</summary>
+        public static void SkipFailedPatchClass(Exception exception, Type patchClass)
+        {
+            SkippedPatchClasses++;
+            string reason = exception.Message;
+            for (Exception? inner = exception.InnerException; inner != null; inner = inner.InnerException)
+                reason += $" <- {inner.GetType().Name}: {inner.Message}";
+            Console.WriteLine($"[StS2Mono] skipped patch class {patchClass.FullName}: {reason}");
+        }
+
         /// <summary>Replaces HarmonyLib.AccessTools.Identifiable, which asks MonoMod.Core
         /// for a canonical MethodInfo: one method reached through different types gives
         /// different MethodInfo objects, so use the one from its declaring type.</summary>

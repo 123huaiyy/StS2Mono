@@ -96,22 +96,29 @@ ${T}return G_LIKELY (!target) ? imethod : target;
  * A method that already tiered up has a second InterpMethod that callers were
  * patched to use, so it gets the redirect too. A redirected method never runs its
  * own code again, so it can't tier up afterwards.
+ * Callers come through a P/Invoke, so in GC safe mode; the lookups take runtime
+ * locks that switch to GC safe mode themselves when contended, which Mono aborts
+ * on unless the thread is back in GC unsafe mode first.
  */
 int
 mono_interp_redirect_method (MonoMethod *from, MonoMethod *to)
 {
+${T}int result = -1;
+${T}MONO_ENTER_GC_UNSAFE;
 ${T}MonoMethodSignature *sig = mono_method_signature_internal (from);
-${T}if (!sig || mono_interp_jit_call_supported (from, sig))
-${T}${T}return -1;
-${T}InterpMethod *source = mono_interp_get_imethod (from);
-${T}InterpMethod *target = to ? mono_interp_get_imethod (to) : NULL;
-${T}if (target == source)
-${T}${T}target = NULL;
-${T}mono_memory_barrier ();
-${T}source->redirect = target;
-${T}if (source->optimized_imethod)
-${T}${T}source->optimized_imethod->redirect = target;
-${T}return 0;
+${T}if (sig && !mono_interp_jit_call_supported (from, sig)) {
+${T}${T}InterpMethod *source = mono_interp_get_imethod (from);
+${T}${T}InterpMethod *target = to ? mono_interp_get_imethod (to) : NULL;
+${T}${T}if (target == source)
+${T}${T}${T}target = NULL;
+${T}${T}mono_memory_barrier ();
+${T}${T}source->redirect = target;
+${T}${T}if (source->optimized_imethod)
+${T}${T}${T}source->optimized_imethod->redirect = target;
+${T}${T}result = 0;
+${T}}
+${T}MONO_EXIT_GC_UNSAFE;
+${T}return result;
 }
 
 static gpointer

@@ -4,6 +4,9 @@
 // In Harmony 2.4.2 only two methods reach MonoMod.Core (`scan` lists them):
 //   PatchTools.DetourMethod   applies a patch      -> StS2Mono.InterpDetour.Detour
 //   AccessTools.Identifiable  normalizes a method  -> StS2Mono.InterpDetour.Identifiable
+// Also, Harmony.PatchAll skips a patch class that fails instead of stopping there
+// (StS2Mono.InterpDetour.SkipFailedPatchClass), since mods built for newer game
+// versions often target a few methods this one lacks.
 //
 // Usage:
 //   harmonypatch patch <0Harmony.dll> <StS2Mono.Harmony.dll> <output.dll>
@@ -51,6 +54,7 @@ static int Patch(string harmonyPath, string adapterPath, string outputPath)
 
     Forward(module, "HarmonyLib.PatchTools", "DetourMethod", interpDetour, "Detour");
     Forward(module, "HarmonyLib.AccessTools", "Identifiable", interpDetour, "Identifiable");
+    CatchPatchClassFailures(module, interpDetour);
 
     harmony.Write(outputPath);
     Console.WriteLine($"written to {outputPath}");
@@ -85,6 +89,50 @@ static void Forward(ModuleDefinition module, string typeName, string methodName,
     il.Emit(OpCodes.Call, module.ImportReference(target));
     il.Emit(OpCodes.Ret);
     Console.WriteLine($"  {method.FullName} -> {target.DeclaringType.FullName}::{target.Name}");
+}
+
+// Harmony.PatchAll(Assembly) runs `type => CreateClassProcessor(type).Patch()` for
+// every patch class and stops at the first one that throws. Wraps that lambda's
+// body in a catch that reports the failure to the adapter and moves on:
+//   try { CreateClassProcessor(type).Patch(); } catch (Exception e) { InterpDetour.SkipFailedPatchClass(e, type); }
+static void CatchPatchClassFailures(ModuleDefinition module, TypeDefinition adapterType)
+{
+    TypeDefinition harmonyType = module.GetType("HarmonyLib.Harmony") ?? throw new InvalidOperationException("HarmonyLib.Harmony not found");
+    MethodDefinition action = Single(harmonyType.Methods.Where(m =>
+        m.Name.StartsWith("<PatchAll>", StringComparison.Ordinal) && !m.IsStatic && m.HasBody
+        && m.ReturnType.FullName == "System.Void" && m.Parameters.Count == 1 && m.Parameters[0].ParameterType.FullName == "System.Type"
+        && m.Body.Instructions.Any(i => i.Operand is MethodReference r && r.Name == "CreateClassProcessor")),
+        "PatchAll lambda that patches one class");
+    MethodReference createClassProcessor = (MethodReference)action.Body.Instructions.Single(i => i.Operand is MethodReference r && r.Name == "CreateClassProcessor").Operand;
+    MethodReference patch = (MethodReference)action.Body.Instructions.Single(i => i.Operand is MethodReference r && r.Name == "Patch").Operand;
+    MethodDefinition report = Single(adapterType.Methods.Where(m => m.Name == "SkipFailedPatchClass"), $"{adapterType.FullName}::SkipFailedPatchClass");
+
+    MethodBody body = action.Body;
+    body.Instructions.Clear();
+    body.ExceptionHandlers.Clear();
+    ILProcessor il = body.GetILProcessor();
+    Instruction ret = il.Create(OpCodes.Ret);
+    Instruction tryStart = il.Create(OpCodes.Ldarg_0);
+    Instruction handlerStart = il.Create(OpCodes.Ldarg_1);
+    il.Append(tryStart);
+    il.Append(il.Create(OpCodes.Ldarg_1));
+    il.Append(il.Create(OpCodes.Call, createClassProcessor));
+    il.Append(il.Create(OpCodes.Callvirt, patch));
+    il.Append(il.Create(OpCodes.Pop));
+    il.Append(il.Create(OpCodes.Leave, ret));
+    il.Append(handlerStart); // the exception is on the stack, then the type
+    il.Append(il.Create(OpCodes.Call, module.ImportReference(report)));
+    il.Append(il.Create(OpCodes.Leave, ret));
+    il.Append(ret);
+    body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+    {
+        TryStart = tryStart,
+        TryEnd = handlerStart,
+        HandlerStart = handlerStart,
+        HandlerEnd = ret,
+        CatchType = module.ImportReference(report.Parameters[0].ParameterType),
+    });
+    Console.WriteLine($"  {action.FullName}: failures go to {adapterType.FullName}::{report.Name}");
 }
 
 static T Single<T>(IEnumerable<T> items, string what)
