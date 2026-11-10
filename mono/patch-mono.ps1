@@ -8,6 +8,9 @@ param(
 #  2. Narrow integer return values extended to 32 bits when the interpreter
 #     returns to native code on arm64, as Apple's ABI requires (a C# `false`
 #     could otherwise arrive in Godot as `true`).
+#  3. No member access checks in the interpreter (see transform.c below).
+#  4. Reading the parameters of a method whose parameter is marked as having a
+#     default value but has none no longer aborts (see reflection.c below).
 # Every anchor must occur exactly once, so a changed upstream file fails loudly.
 
 $ErrorActionPreference = "Stop"
@@ -157,6 +160,25 @@ interp_generate_mae_throw (TransformData *td, MonoMethod *method, MonoMethod *ta
     @(
         "${T}${T}${T}${T}if (!mono_method_can_access_method (method, m))`n${T}${T}${T}${T}${T}interp_generate_mae_throw (td, method, m);",
         "${T}${T}${T}${T}if (STS2MONO_CHECK_ACCESS && !mono_method_can_access_method (method, m))`n${T}${T}${T}${T}${T}interp_generate_mae_throw (td, method, m);"
+    )
+)
+
+# The replacements Harmony generates copy the original's parameter attributes,
+# so a parameter with a default value (float volume = 1f) is marked HasDefault,
+# but the value itself isn't copied. Mono then found no constant, read its type
+# as 0, and mono_class_from_mono_type_internal aborted the process. Stack traces
+# read every frame's parameters, so a game error or exception logged while such
+# a replacement was on the stack crashed the game. A missing value now counts as
+# no default value; dynamic methods, which have no MethodDef row to look the
+# value up by, are treated the same way instead of failing an assertion.
+Edit-Source "src/mono/mono/metadata/reflection.c" @(
+    @(
+        "${T}if (!(sig_param->attrs & PARAM_ATTRIBUTE_HAS_DEFAULT) ||`n${T}    (method->wrapper_type != MONO_WRAPPER_NONE && method->wrapper_type != MONO_WRAPPER_DYNAMIC_METHOD)) {",
+        "${T}/* StS2Mono: !blob_type_enum, a parameter marked HasDefault without a value. */`n${T}if (!(sig_param->attrs & PARAM_ATTRIBUTE_HAS_DEFAULT) || !blob_type_enum ||`n${T}    (method->wrapper_type != MONO_WRAPPER_NONE && method->wrapper_type != MONO_WRAPPER_DYNAMIC_METHOD)) {"
+    ),
+    @(
+        "${T}idx = mono_method_get_index (method);`n${T}g_assert (idx != 0);`n`n${T}param_index = mono_metadata_get_method_params (image, idx, &lastp);",
+        "${T}idx = mono_method_get_index (method);`n${T}/* StS2Mono: a dynamic method has no MethodDef row, so no default values to read. */`n${T}if (!idx)`n${T}${T}return;`n`n${T}param_index = mono_metadata_get_method_params (image, idx, &lastp);"
     )
 )
 

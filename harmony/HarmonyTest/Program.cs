@@ -5,6 +5,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -26,6 +27,7 @@ namespace StS2Mono.HarmonyTest
         public static Big MakeBig(long x) => new Big { A = x, B = x, C = x, D = x, E = x };
         public static int CompareAscending(int a, int b) => a.CompareTo(b);
         public static int Throws() => throw new InvalidOperationException("thrown by the original");
+        public static string Volume(string path, float volume = 1f) => $"{path} {volume}";
         public static int Limit => 10;
     }
 
@@ -275,6 +277,18 @@ namespace StS2Mono.HarmonyTest
         private static Exception? Finalizer(Exception? __exception) => null;
     }
 
+    // The replacement for Volume copies its parameters, with `volume` marked as having a
+    // default value but without the value. Formatting a stack trace reads the parameters of
+    // every frame, which made Mono abort while the replacement was on the stack (see
+    // mono/patch-mono.ps1, reflection.c).
+    [HarmonyPatch(typeof(Targets), nameof(Targets.Volume))]
+    internal static class VolumePatch
+    {
+        internal static string? Trace;
+
+        private static void Prefix() => Trace = new StackTrace().ToString();
+    }
+
     public static class Program
     {
         private static int failures;
@@ -350,7 +364,12 @@ namespace StS2Mono.HarmonyTest
             Check("large struct result", () => Targets.MakeBig(5).E + Targets.MakeBig(5).A, 47L);
             Check("delegate called by List.Sort", () => { var list = new List<int> { 2, 3, 1 }; list.Sort(compare); return string.Join(",", list); }, "3,2,1");
             Check("finalizer swallows the exception", () => Targets.Throws(), 0);
-            Check("patched methods known to Harmony", () => harmony.GetPatchedMethods().Count(), 19);
+            Check("stack trace through a replacement with a default-valued parameter", () =>
+            {
+                string result = Targets.Volume("a");
+                return $"{result}, parameters shown: {VolumePatch.Trace?.Contains("Single volume")}";
+            }, "a 1, parameters shown: True");
+            Check("patched methods known to Harmony", () => harmony.GetPatchedMethods().Count(), 20);
             Check("types that can't load are left out, the others found", () =>
             {
                 Type[] types = AccessTools.GetTypesFromAssembly(typeof(Program).Assembly);
