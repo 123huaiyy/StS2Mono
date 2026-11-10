@@ -13,6 +13,7 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
 - `mono/patch-mono.ps1` 给 Mono 加了 `mono_interp_redirect_method`：让对一个解释执行的方法的调用改去执行另一个方法（Harmony 生成的替换方法）。同一个补丁还修了 arm64 上解释器把 bool 等窄整数返回给原生代码时没有扩展到 32 位的问题。
 - `harmony/StS2Mono.Harmony` 是适配层；`harmony/harmonypatch` 用 Cecil 改写 Lib.Harmony 2.4.2 的 `0Harmony.dll`（游戏自带的就是这个版本），让 `PatchTools.DetourMethod` 和 `AccessTools.Identifiable` 改走适配层。
 - 同一个补丁还关掉了解释器的成员访问检查。很多模组是对公开化（publicizer）过的游戏程序集编译的，靠 `[IgnoresAccessChecksTo]` 访问私有成员，CoreCLR 认这个，Mono 不认；Harmony 生成的替换方法也会调用 protected 的基类构造函数。
+- 给新版游戏做的模组会调用在新版里变成 `init` 的属性 setter，签名只比这个版本的普通 setter 多一个 `modreq(IsExternalInit)`，Mono 因此找不到方法。现在完全匹配找不到时，忽略这类修饰符再匹配一次。
 - 它还修了 Mono 读取参数信息时的一个中止：Harmony 的替换方法复制了“参数有默认值”的标记，却没有复制默认值本身，Mono 读不到值就直接中止进程。调用栈要读每一帧的参数，所以这种替换方法在栈上时，游戏只要打印错误或异常就会闪退。现在没有值的当作没有默认值。
 - 为了兼容给新版游戏做的模组，改写后的 Harmony 遇到失败不会中断：
   - `Harmony.PatchAll` 跳过失败的补丁类，继续打其它的（`console.log` 里记 `[StS2Mono] skipped patch class ...`）；

@@ -12,6 +12,8 @@ param(
 #  4. Reading the parameters of a method whose parameter is marked as having a
 #     default value but has none no longer aborts (see reflection.c below).
 #  5. Thread dumps name interpreted frames (see threads.c below).
+#  6. A method reference that differs from the method only by custom modifiers
+#     (an `init` setter against a plain one) still binds (see loader.c below).
 # Every anchor must occur exactly once, so a changed upstream file fails loudly.
 
 $ErrorActionPreference = "Stop"
@@ -180,6 +182,43 @@ Edit-Source "src/mono/mono/metadata/reflection.c" @(
     @(
         "${T}idx = mono_method_get_index (method);`n${T}g_assert (idx != 0);`n`n${T}param_index = mono_metadata_get_method_params (image, idx, &lastp);",
         "${T}idx = mono_method_get_index (method);`n${T}/* StS2Mono: a dynamic method has no MethodDef row, so no default values to read. */`n${T}if (!idx)`n${T}${T}return;`n`n${T}param_index = mono_metadata_get_method_params (image, idx, &lastp);"
+    )
+)
+
+# Mods built for newer versions of the game call property setters that became
+# `init` there. Such a setter's signature differs from this version's plain one
+# only by modreq(IsExternalInit) on its return type, so the call didn't bind and
+# threw MissingMethodException (an ancient event mod's dialogue never loaded, and
+# the event showed no options). When nothing in the class matches exactly, a
+# method that matches but for custom modifiers is used.
+Edit-Source "src/mono/mono/metadata/loader.c" @(
+    ,@(
+        "`n${T}if (matched) {`n${T}${T}if (i < mcount)",
+        @"
+
+${T}/* StS2Mono: see patch-mono.ps1, loader.c. */
+${T}if (!matched && sig->call_convention != MONO_CALL_VARARG) {
+${T}${T}i = -1;
+${T}${T}iter = NULL;
+${T}${T}while ((m = mono_class_get_methods (klass, &iter))) {
+${T}${T}${T}++i;
+${T}${T}${T}if (!((fqname && !strcmp (m->name, fqname)) ||
+${T}${T}${T}      (qname && !strcmp (m->name, qname)) ||
+${T}${T}${T}      (name && !strcmp (m->name, name))))
+${T}${T}${T}${T}continue;
+${T}${T}${T}MonoMethodSignature *msig = mono_method_signature_checked (m, error);
+${T}${T}${T}if (!is_ok (error))
+${T}${T}${T}${T}return NULL;
+${T}${T}${T}if (msig && mono_metadata_signature_equal_ignore_custom_modifier (sig, msig)) {
+${T}${T}${T}${T}matched = TRUE;
+${T}${T}${T}${T}break;
+${T}${T}${T}}
+${T}${T}}
+${T}}
+
+${T}if (matched) {
+${T}${T}if (i < mcount)
+"@.Replace("`r`n", "`n").TrimEnd("`n")
     )
 )
 

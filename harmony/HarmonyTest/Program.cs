@@ -370,6 +370,7 @@ namespace StS2Mono.HarmonyTest
                 return $"{result}, parameters shown: {VolumePatch.Trace?.Contains("Single volume")}";
             }, "a 1, parameters shown: True");
             Check("patched methods known to Harmony", () => harmony.GetPatchedMethods().Count(), 20);
+            Check("init setter call bound to a plain setter", () => new StS2Mono.HarmonyTest.Missing.InitProps { Value = 5 }.Value, 5);
             Check("types that can't load are left out, the others found", () =>
             {
                 Type[] types = AccessTools.GetTypesFromAssembly(typeof(Program).Assembly);
