@@ -341,6 +341,8 @@ Edit-Source "src/mono/mono/mini/interp/transform.c" @(
         "/* Return FALSE if error, including inline failure */`nstatic gboolean`ninterp_transform_call (TransformData *td, MonoMethod *method, MonoMethod *target_method, MonoGenericContext *generic_context, MonoClass *constrained_class, gboolean readonly, MonoError *error, gboolean check_visibility, gboolean save_last_error, gboolean tailcall)`n{",
         @"
 /* StS2Mono: see patch-mono.ps1, transform.c, drift. */
+#include <mono/metadata/tokentype.h>
+
 #define STS2MONO_DRIFT_MAX_DEFAULTS 8
 
 typedef enum {
@@ -354,7 +356,8 @@ ${T}MonoType *type;
 ${T}guint8 kind; /* MONO_TYPE_* of the constant, MONO_TYPE_CLASS for null */
 ${T}gint64 i;
 ${T}double r;
-${T}MonoString *str; /* interned, so the intern table keeps it alive */
+${T}const char *chars; /* a string's UTF-16 characters, in the metadata */
+${T}guint32 chars_len;
 } Sts2MonoDefault;
 
 typedef struct {
@@ -435,7 +438,8 @@ ${T}${T}out->type = type;
 ${T}${T}out->kind = (guint8)ccols [MONO_CONSTANT_TYPE];
 ${T}${T}out->i = 0;
 ${T}${T}out->r = 0;
-${T}${T}out->str = NULL;
+${T}${T}out->chars = NULL;
+${T}${T}out->chars_len = 0;
 ${T}${T}switch (out->kind) {
 ${T}${T}case MONO_TYPE_BOOLEAN:
 ${T}${T}case MONO_TYPE_U1: out->i = blob [0]; break;
@@ -450,18 +454,10 @@ ${T}${T}case MONO_TYPE_U8: out->i = (gint64)read64 (blob); break;
 ${T}${T}case MONO_TYPE_R4: { float f; readr4 (blob, &f); out->r = f; break; }
 ${T}${T}case MONO_TYPE_R8: readr8 (blob, &out->r); break;
 ${T}${T}case MONO_TYPE_CLASS: break; /* null */
-${T}${T}case MONO_TYPE_STRING: {
-${T}${T}${T}ERROR_DECL (str_error);
-${T}${T}${T}MonoString *s = mono_string_new_utf16_checked ((const gunichar2 *)value, len / 2, str_error);
-${T}${T}${T}if (s && is_ok (str_error))
-${T}${T}${T}${T}s = mono_string_intern_checked (s, str_error);
-${T}${T}${T}if (!s || !is_ok (str_error)) {
-${T}${T}${T}${T}mono_error_cleanup (str_error);
-${T}${T}${T}${T}return FALSE;
-${T}${T}${T}}
-${T}${T}${T}out->str = s;
+${T}${T}case MONO_TYPE_STRING:
+${T}${T}${T}out->chars = value;
+${T}${T}${T}out->chars_len = len / 2;
 ${T}${T}${T}break;
-${T}${T}}
 ${T}${T}default:
 ${T}${T}${T}return FALSE;
 ${T}${T}}
@@ -581,20 +577,32 @@ ${T}return tie ? NULL : best;
 }
 
 static void
-sts2mono_push_const (TransformData *td, MonoType *type, guint8 kind, gint64 i, double r, MonoString *str)
+sts2mono_push_const (TransformData *td, MonoType *type, guint8 kind, gint64 i, double r, const char *chars, guint32 chars_len)
 {
 ${T}gboolean real = kind == MONO_TYPE_R4 || kind == MONO_TYPE_R8;
 ${T}switch (sts2mono_simple_stack_type (type)) {
-${T}case STACK_TYPE_O:
-${T}${T}if (str) {
+${T}case STACK_TYPE_O: {
+${T}${T}MonoString *s = NULL;
+${T}${T}if (chars) {
+${T}${T}${T}ERROR_DECL (str_error);
+${T}${T}${T}s = mono_string_new_utf16_checked ((const gunichar2 *)chars, chars_len, str_error);
+${T}${T}${T}if (!is_ok (str_error)) {
+${T}${T}${T}${T}mono_error_cleanup (str_error);
+${T}${T}${T}${T}s = NULL;
+${T}${T}${T}}
+${T}${T}}
+${T}${T}if (s) {
+${T}${T}${T}/* The compiled code points at the string; a pinned handle keeps it alive and in place. */
+${T}${T}${T}mono_gchandle_new_internal ((MonoObject *)s, TRUE);
 ${T}${T}${T}interp_add_ins (td, MINT_LDSTR);
-${T}${T}${T}td->last_ins->data [0] = get_data_item_index (td, str);
+${T}${T}${T}td->last_ins->data [0] = get_data_item_index (td, s);
 ${T}${T}${T}push_type (td, STACK_TYPE_O, mono_defaults.string_class);
 ${T}${T}} else {
 ${T}${T}${T}interp_add_ins (td, MINT_LDNULL);
 ${T}${T}${T}push_type (td, STACK_TYPE_O, NULL);
 ${T}${T}}
 ${T}${T}break;
+${T}}
 ${T}case STACK_TYPE_I4: {
 ${T}${T}gint32 v = real ? (gint32)r : (gint32)i;
 ${T}${T}interp_add_ins (td, MINT_LDC_I4);
@@ -640,7 +648,7 @@ ${T}g_free (from);
 ${T}g_free (to);
 ${T}for (int i = 0; i < d->extra; i++) {
 ${T}${T}Sts2MonoDefault *v = &d->defaults [i];
-${T}${T}sts2mono_push_const (td, v->type, v->kind, v->i, v->r, v->str);
+${T}${T}sts2mono_push_const (td, v->type, v->kind, v->i, v->r, v->chars, v->chars_len);
 ${T}}
 }
 
@@ -675,7 +683,7 @@ ${T}if (drifted && drift.ret == STS2MONO_RET_POP) {
 ${T}${T}interp_add_ins (td, MINT_NOP);
 ${T}${T}--td->sp;
 ${T}} else if (drifted && drift.ret == STS2MONO_RET_DEFAULT) {
-${T}${T}sts2mono_push_const (td, drift.ret_type, MONO_TYPE_CLASS, 0, 0, NULL);
+${T}${T}sts2mono_push_const (td, drift.ret_type, MONO_TYPE_CLASS, 0, 0, NULL, 0);
 ${T}}
 ${T}return TRUE;
 }
