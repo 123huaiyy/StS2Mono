@@ -20,6 +20,7 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
   - `Harmony.Patch` / `PatchProcessor.Patch` 失败时返回 null，比如转译器在这个版本里找不到要改的代码（记 `[StS2Mono] skipped a patch of ...`）；
   - `AccessTools.GetTypesFromAssembly` 在 Mono 抛普通 `TypeLoadException` 时逐个读取类型，跳过加载不了的。
   原版 Harmony 在这些地方会抛异常，模组剩下的补丁和初始化就都没了。
+- 很多模组一看到 iOS（或者 `RuntimeFeature.IsDynamicCodeCompiled` 为 false，解释器里就是这样）就认定不能打补丁，关掉自己的 Harmony 补丁。所以从 mods 文件夹加载的代码会被告知运行在安卓上：解释器编译这些代码时，把对 `Godot.OS.GetName` / `HasFeature`、`OperatingSystem.IsIOS` / `IsAndroid` 的调用换成 GodotSharp 里 `Godot.OS.StS2Mono_*` 的同名方法（需要往 GodotSharp.dll 里加上这几个方法，没有就不替换），`IsDynamicCodeCompiled` 对它们为 true。游戏本体看到的仍然是 iOS。
 - 解释器的内联必须关掉（桥接代码设置了 `MONO_INTERPRETER_OPTIONS=-inline`），否则被内联的方法不会经过重定向。
 - 预编译（AOT）的 System.Private.CoreLib 里的方法不能打补丁，其它程序集（游戏、GodotSharp、其它基础类库）都可以。
 

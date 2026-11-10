@@ -14,6 +14,8 @@ param(
 #  5. Thread dumps name interpreted frames (see threads.c below).
 #  6. A method reference that differs from the method only by custom modifiers
 #     (an `init` setter against a plain one) still binds (see loader.c below).
+#  7. Code loaded from the mods folder is told it runs on Android, so mods that
+#     turn their Harmony patches off on iOS keep them (see transform.c, mods).
 # Every anchor must occur exactly once, so a changed upstream file fails loudly.
 
 $ErrorActionPreference = "Stop"
@@ -218,6 +220,96 @@ ${T}}
 
 ${T}if (matched) {
 ${T}${T}if (i < mcount)
+"@.Replace("`r`n", "`n").TrimEnd("`n")
+    )
+)
+
+# transform.c, mods: mods decide from the platform whether they can patch the game.
+# iOS builds of Godot games normally run ahead-of-time compiled code that can't be
+# patched, so mods take iOS (or RuntimeFeature.IsDynamicCodeCompiled being false,
+# which it is in this interpreter) to mean "no Harmony" and run without their
+# patches (P3Makoto: "runtime code patching unavailable (platform iOS) -> effects
+# disabled"). StS2Mono patches through the interpreter, as the game's Android port
+# does through its JIT, so code loaded from the mods folder is told it runs on
+# Android: its calls to Godot.OS.GetName and HasFeature and to
+# OperatingSystem.IsIOS and IsAndroid go to the StS2Mono_* methods tools/ilpatch
+# adds to GodotSharp's Godot.OS, and IsDynamicCodeCompiled is true for it. The
+# substitution is made when a method is compiled to interpreter code, so it costs
+# nothing per call. The game itself still sees iOS.
+Edit-Source "src/mono/mono/mini/interp/transform.c" @(
+    @(
+        "/* Return TRUE if call transformation is finished */`nstatic gboolean`ninterp_handle_intrinsics (",
+        @"
+#include <mono/metadata/image-internals.h>
+#include <mono/metadata/loader-internals.h>
+
+/* StS2Mono: see patch-mono.ps1, transform.c, mods. */
+static gboolean
+sts2mono_is_mod_method (MonoMethod *method)
+{
+${T}const char *file = method ? mono_image_get_filename (m_class_get_image (method->klass)) : NULL;
+${T}return file && (strstr (file, "/Documents/mods/") || strstr (file, ".app/mods/"));
+}
+
+static MonoMethod *
+sts2mono_mod_substitute (MonoMethod *target)
+{
+${T}static const char *const subs [][4] = {
+${T}${T}/* namespace, class, method, method in Godot.OS that mods call instead */
+${T}${T}{ "Godot", "OS", "GetName", "StS2Mono_GetName" },
+${T}${T}{ "Godot", "OS", "HasFeature", "StS2Mono_HasFeature" },
+${T}${T}{ "System", "OperatingSystem", "IsIOS", "StS2Mono_IsIOS" },
+${T}${T}{ "System", "OperatingSystem", "IsAndroid", "StS2Mono_IsAndroid" },
+${T}};
+${T}MonoClass *klass = target->klass;
+${T}for (guint i = 0; i < G_N_ELEMENTS (subs); i++) {
+${T}${T}if (strcmp (target->name, subs [i][2]) || strcmp (m_class_get_name (klass), subs [i][1]) || strcmp (m_class_get_name_space (klass), subs [i][0]))
+${T}${T}${T}continue;
+${T}${T}MonoImage *godot = m_class_get_image (klass);
+${T}${T}if (strcmp (subs [i][0], "Godot"))
+${T}${T}${T}godot = mono_image_loaded_internal (mono_alc_get_default (), "GodotSharp");
+${T}${T}if (!godot)
+${T}${T}${T}return NULL;
+${T}${T}ERROR_DECL (class_error);
+${T}${T}MonoClass *os = mono_class_from_name_checked (godot, "Godot", "OS", class_error);
+${T}${T}mono_error_cleanup (class_error);
+${T}${T}if (!os)
+${T}${T}${T}return NULL;
+${T}${T}ERROR_DECL (method_error);
+${T}${T}MonoMethod *substitute = mono_class_get_method_from_name_checked (os, subs [i][3], mono_method_signature_internal (target)->param_count, 0, method_error);
+${T}${T}mono_error_cleanup (method_error);
+${T}${T}/* NULL with a GodotSharp that tools/ilpatch didn't patch: the call stays as it is. */
+${T}${T}return substitute;
+${T}}
+${T}return NULL;
+}
+
+/* Return TRUE if call transformation is finished */
+static gboolean
+interp_handle_intrinsics (
+"@.Replace("`r`n", "`n").TrimEnd("`n")
+    ),
+    @(
+        "${T}${T}if (!strcmp (tm, `"get_IsDynamicCodeCompiled`"))`n${T}${T}${T}*op = MINT_LDC_I4_0;",
+        "${T}${T}if (!strcmp (tm, `"get_IsDynamicCodeCompiled`"))`n${T}${T}${T}*op = sts2mono_is_mod_method (td->method) ? MINT_LDC_I4_1 : MINT_LDC_I4_0;"
+    ),
+    @(
+        "${T}} else {`n${T}${T}csignature = mono_method_signature_internal (target_method);`n${T}}`n`n${T}if (calli && csignature->param_count == 0 && csignature->call_convention == MONO_CALL_THISCALL) {",
+        @"
+${T}} else {
+${T}${T}csignature = mono_method_signature_internal (target_method);
+${T}}
+
+${T}/* StS2Mono: see patch-mono.ps1, transform.c, mods. */
+${T}if (target_method && !calli && sts2mono_is_mod_method (method)) {
+${T}${T}MonoMethod *substitute = sts2mono_mod_substitute (target_method);
+${T}${T}if (substitute) {
+${T}${T}${T}target_method = substitute;
+${T}${T}${T}csignature = mono_method_signature_internal (target_method);
+${T}${T}}
+${T}}
+
+${T}if (calli && csignature->param_count == 0 && csignature->call_convention == MONO_CALL_THISCALL) {
 "@.Replace("`r`n", "`n").TrimEnd("`n")
     )
 )
