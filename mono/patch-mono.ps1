@@ -128,6 +128,38 @@ interp_get_interp_method (MonoMethod *method)
     )
 )
 
+Edit-Source "src/mono/mono/mini/interp/transform.c" @(
+    @(
+        "static void`ninterp_generate_mae_throw (TransformData *td, MonoMethod *method, MonoMethod *target_method)`n{",
+        @"
+/*
+ * StS2Mono: the interpreter doesn't enforce member visibility. Mods are usually
+ * compiled against a publicized game assembly and declare [IgnoresAccessChecksTo],
+ * which CoreCLR honors and Mono doesn't, and the replacements Harmony generates call
+ * protected base constructors and private members. A game has nothing to protect
+ * with these checks, so they're off: calls, ldftn, and field access.
+ */
+#define STS2MONO_CHECK_ACCESS 0
+
+static void
+interp_generate_mae_throw (TransformData *td, MonoMethod *method, MonoMethod *target_method)
+{
+"@.Replace("`r`n", "`n")
+    ),
+    @(
+        "${T}if (check_visibility && target_method && !mono_method_can_access_method (method, target_method))",
+        "${T}if (STS2MONO_CHECK_ACCESS && check_visibility && target_method && !mono_method_can_access_method (method, target_method))"
+    ),
+    @(
+        "${T}if (!method->skip_visibility && !mono_method_can_access_field (method, field)) {",
+        "${T}if (STS2MONO_CHECK_ACCESS && !method->skip_visibility && !mono_method_can_access_field (method, field)) {"
+    ),
+    @(
+        "${T}${T}${T}${T}if (!mono_method_can_access_method (method, m))`n${T}${T}${T}${T}${T}interp_generate_mae_throw (td, method, m);",
+        "${T}${T}${T}${T}if (STS2MONO_CHECK_ACCESS && !mono_method_can_access_method (method, m))`n${T}${T}${T}${T}${T}interp_generate_mae_throw (td, method, m);"
+    )
+)
+
 Edit-Source "src/mono/mono/mini/mini-arm64.c" @(
     @(
         "/* Set return value in the ccontext (for n2i return) */`nvoid`nmono_arch_set_native_call_context_ret",

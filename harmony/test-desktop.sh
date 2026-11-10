@@ -17,5 +17,16 @@ dotnet publish "$ROOT/harmony/HarmonyTest/HarmonyTest.csproj" -c Release -r osx-
     -p:RuntimeFrameworkVersion="$NET_VERSION" -p:HarmonyDir="$HARMONY_OUT/" -o "$APP" --nologo
 cp "$MONO_BUILD/libcoreclr.dylib" "$APP/libcoreclr.dylib"
 cp "$MONO_BUILD/System.Private.CoreLib.dll" "$APP/System.Private.CoreLib.dll"
+# The stand-in library without the type the test's Orphan class is built on.
+dotnet build "$ROOT/harmony/HarmonyTest.Missing/HarmonyTest.Missing.csproj" -c Release \
+    -p:DefineConstants=WITHOUT_TYPES -o "$ROOT/work/harmonytest-missing" --nologo
+cp "$ROOT/work/harmonytest-missing/HarmonyTest.Missing.dll" "$APP/"
 
-MONO_ENV_OPTIONS="--interpreter" MONO_INTERPRETER_OPTIONS="-inline" "$APP/StS2Mono.HarmonyTest"
+# Once for each way MonoMod can make Harmony's replacement methods: a DynamicMethod
+# (the default), or a method in a generated assembly (MethodBuilder, Cecil).
+for generator in "" mb cecil; do
+    echo "::group::replacements by the ${generator:-default} generator"
+    if [ -n "$generator" ]; then export MONOMOD_DMDType="$generator"; else unset MONOMOD_DMDType; fi
+    MONO_ENV_OPTIONS="--interpreter" MONO_INTERPRETER_OPTIONS="-inline" "$APP/StS2Mono.HarmonyTest"
+    echo "::endgroup::"
+done

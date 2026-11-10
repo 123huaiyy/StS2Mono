@@ -13,5 +13,6 @@
   <ItemGroup>
     <Reference Include="0Harmony" HintPath="$(HarmonyDir)0Harmony.dll" />
     <Reference Include="StS2Mono.Harmony" HintPath="$(HarmonyDir)StS2Mono.Harmony.dll" />
+    <ProjectReference Include="../HarmonyTest.Missing/HarmonyTest.Missing.csproj" />
   </ItemGroup>
 </Project>

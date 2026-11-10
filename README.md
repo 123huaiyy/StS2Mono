@@ -12,7 +12,12 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
 
 - `mono/patch-mono.ps1` 给 Mono 加了 `mono_interp_redirect_method`：让对一个解释执行的方法的调用改去执行另一个方法（Harmony 生成的替换方法）。同一个补丁还修了 arm64 上解释器把 bool 等窄整数返回给原生代码时没有扩展到 32 位的问题。
 - `harmony/StS2Mono.Harmony` 是适配层；`harmony/harmonypatch` 用 Cecil 改写 Lib.Harmony 2.4.2 的 `0Harmony.dll`（游戏自带的就是这个版本），让 `PatchTools.DetourMethod` 和 `AccessTools.Identifiable` 改走适配层。
-- 改写后的 `Harmony.PatchAll` 遇到某个补丁类失败（比如目标方法在这个游戏版本里不存在）时，会跳过这个类继续打其它补丁，并在 `console.log` 里记一行 `[StS2Mono] skipped patch class ...`。原版 Harmony 会在这里中断，整个模组剩下的补丁都打不上。
+- 同一个补丁还关掉了解释器的成员访问检查。很多模组是对公开化（publicizer）过的游戏程序集编译的，靠 `[IgnoresAccessChecksTo]` 访问私有成员，CoreCLR 认这个，Mono 不认；Harmony 生成的替换方法也会调用 protected 的基类构造函数。
+- 为了兼容给新版游戏做的模组，改写后的 Harmony 遇到失败不会中断：
+  - `Harmony.PatchAll` 跳过失败的补丁类，继续打其它的（`console.log` 里记 `[StS2Mono] skipped patch class ...`）；
+  - `Harmony.Patch` / `PatchProcessor.Patch` 失败时返回 null，比如转译器在这个版本里找不到要改的代码（记 `[StS2Mono] skipped a patch of ...`）；
+  - `AccessTools.GetTypesFromAssembly` 在 Mono 抛普通 `TypeLoadException` 时逐个读取类型，跳过加载不了的。
+  原版 Harmony 在这些地方会抛异常，模组剩下的补丁和初始化就都没了。
 - 解释器的内联必须关掉（桥接代码设置了 `MONO_INTERPRETER_OPTIONS=-inline`），否则被内联的方法不会经过重定向。
 - 预编译（AOT）的 System.Private.CoreLib 里的方法不能打补丁，其它程序集（游戏、GodotSharp、其它基础类库）都可以。
 

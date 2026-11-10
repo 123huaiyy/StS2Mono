@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Stands for a library mod. test-desktop.sh swaps in a build with
+       -p:DefineConstants=WITHOUT_TYPES, which lacks MissingBase. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>HarmonyTest.Missing</AssemblyName>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

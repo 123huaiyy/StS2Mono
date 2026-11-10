@@ -4,9 +4,11 @@
 // In Harmony 2.4.2 only two methods reach MonoMod.Core (`scan` lists them):
 //   PatchTools.DetourMethod   applies a patch      -> StS2Mono.InterpDetour.Detour
 //   AccessTools.Identifiable  normalizes a method  -> StS2Mono.InterpDetour.Identifiable
-// Also, Harmony.PatchAll skips a patch class that fails instead of stopping there
-// (StS2Mono.InterpDetour.SkipFailedPatchClass), since mods built for newer game
-// versions often target a few methods this one lacks.
+// Also, for mods built for newer game versions, which often target a few methods or IL
+// sequences this one lacks:
+//   Harmony.PatchAll skips a patch class that fails       -> InterpDetour.SkipFailedPatchClass
+//   PatchProcessor.Patch (Harmony.Patch) returns null      -> InterpDetour.SkipFailedPatch
+//   AccessTools.GetTypesFromAssembly survives Mono's TypeLoadException -> InterpDetour.GetTypesFromAssembly
 //
 // Usage:
 //   harmonypatch patch <0Harmony.dll> <StS2Mono.Harmony.dll> <output.dll>
@@ -15,6 +17,7 @@
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using Mono.Cecil.Rocks;
 
 if (args.Length == 4 && args[0] == "patch")
 {
@@ -54,7 +57,9 @@ static int Patch(string harmonyPath, string adapterPath, string outputPath)
 
     Forward(module, "HarmonyLib.PatchTools", "DetourMethod", interpDetour, "Detour");
     Forward(module, "HarmonyLib.AccessTools", "Identifiable", interpDetour, "Identifiable");
+    Forward(module, "HarmonyLib.AccessTools", "GetTypesFromAssembly", interpDetour, "GetTypesFromAssembly");
     CatchPatchClassFailures(module, interpDetour);
+    CatchPatchFailures(module, interpDetour);
 
     harmony.Write(outputPath);
     Console.WriteLine($"written to {outputPath}");
@@ -133,6 +138,55 @@ static void CatchPatchClassFailures(ModuleDefinition module, TypeDefinition adap
         CatchType = module.ImportReference(report.Parameters[0].ParameterType),
     });
     Console.WriteLine($"  {action.FullName}: failures go to {adapterType.FullName}::{report.Name}");
+}
+
+// PatchProcessor.Patch(), which Harmony.Patch runs, throws when a patch can't be
+// applied, ending whatever the caller was doing. Wraps its whole body:
+//   try { <body> } catch (Exception e) { InterpDetour.SkipFailedPatch(e, this.original); return null; }
+// A failed patch never reaches Harmony's shared state (that's saved after the replacement
+// is made), so later patches of the same method aren't affected.
+static void CatchPatchFailures(ModuleDefinition module, TypeDefinition adapterType)
+{
+    TypeDefinition processorType = module.GetType("HarmonyLib.PatchProcessor") ?? throw new InvalidOperationException("HarmonyLib.PatchProcessor not found");
+    MethodDefinition patch = Single(processorType.Methods.Where(m => m.Name == "Patch" && !m.IsStatic && m.Parameters.Count == 0), "PatchProcessor.Patch()");
+    FieldDefinition original = Single(processorType.Fields.Where(f => f.Name == "original"), "PatchProcessor.original");
+    MethodDefinition report = Single(adapterType.Methods.Where(m => m.Name == "SkipFailedPatch"), $"{adapterType.FullName}::SkipFailedPatch");
+
+    MethodBody body = patch.Body;
+    body.SimplifyMacros(); // instructions get inserted; short branches may no longer reach
+    ILProcessor il = body.GetILProcessor();
+    var result = new VariableDefinition(patch.ReturnType);
+    body.Variables.Add(result);
+    Instruction end = il.Create(OpCodes.Ldloc, result);
+
+    // Each `ret` becomes `stloc result; leave end`, changed in place so branches to it still land.
+    foreach (Instruction ret in body.Instructions.Where(i => i.OpCode == OpCodes.Ret).ToList())
+    {
+        ret.OpCode = OpCodes.Stloc;
+        ret.Operand = result;
+        il.InsertAfter(ret, il.Create(OpCodes.Leave, end));
+    }
+    Instruction tryStart = body.Instructions[0];
+    Instruction handlerStart = il.Create(OpCodes.Ldarg_0);
+    il.Append(handlerStart); // the exception is on the stack, then this.original
+    il.Append(il.Create(OpCodes.Ldfld, original));
+    il.Append(il.Create(OpCodes.Call, module.ImportReference(report)));
+    il.Append(il.Create(OpCodes.Ldnull));
+    il.Append(il.Create(OpCodes.Stloc, result));
+    il.Append(il.Create(OpCodes.Leave, end));
+    il.Append(end);
+    il.Append(il.Create(OpCodes.Ret));
+    // Added last: an enclosing handler has to come after the ones it contains.
+    body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+    {
+        TryStart = tryStart,
+        TryEnd = handlerStart,
+        HandlerStart = handlerStart,
+        HandlerEnd = end,
+        CatchType = module.ImportReference(report.Parameters[0].ParameterType),
+    });
+    body.OptimizeMacros();
+    Console.WriteLine($"  {patch.FullName}: failures go to {adapterType.FullName}::{report.Name}");
 }
 
 static T Single<T>(IEnumerable<T> items, string what)

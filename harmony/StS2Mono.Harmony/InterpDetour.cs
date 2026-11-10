@@ -64,10 +64,78 @@ namespace StS2Mono
         public static void SkipFailedPatchClass(Exception exception, Type patchClass)
         {
             SkippedPatchClasses++;
-            string reason = exception.Message;
+            Console.WriteLine($"[StS2Mono] skipped patch class {patchClass.FullName}: {Reason(exception)}");
+        }
+
+        /// <summary>Harmony.Patch / PatchProcessor.Patch calls that failed and were skipped.</summary>
+        public static int SkippedPatches { get; private set; }
+
+        /// <summary>Called by PatchProcessor.Patch (rewritten by harmonypatch) when it fails, for
+        /// example when a transpiler made for a newer game can't find its code here. The
+        /// exception would end the caller's initialization (BaseLib patches this way); instead
+        /// the failure is logged, nothing is patched, and Patch returns null.</summary>
+        public static void SkipFailedPatch(Exception exception, MethodBase? original)
+        {
+            SkippedPatches++;
+            Console.WriteLine($"[StS2Mono] skipped a patch of {(original is null ? "(no method)" : Describe(original))}: {Reason(exception)}");
+        }
+
+        /// <summary>Replaces HarmonyLib.AccessTools.GetTypesFromAssembly. A mod built for a newer
+        /// game has types that don't load here (their base types or interfaces are missing).
+        /// On CoreCLR, GetTypes then throws ReflectionTypeLoadException, which Harmony handles;
+        /// Mono often throws a plain TypeLoadException for the whole assembly, so the types are
+        /// then taken one by one, leaving out those that fail.</summary>
+        public static Type[] GetTypesFromAssembly(Assembly assembly)
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException e)
+            {
+                return Array.FindAll(e.Types, t => t != null)!;
+            }
+            catch (Exception)
+            {
+                return GetTypesOneByOne(assembly);
+            }
+        }
+
+        private static Type[] GetTypesOneByOne(Assembly assembly)
+        {
+            var types = new List<Type>();
+            int failed = 0;
+            foreach (Module module in assembly.GetModules())
+            {
+                // TypeDef rows from 2 (row 1 is <Module>) until the token is out of range.
+                for (int row = 2; row < 0x00FFFFFF; row++)
+                {
+                    try
+                    {
+                        Type? type = module.ResolveType(0x02000000 | row);
+                        if (type != null)
+                            types.Add(type);
+                    }
+                    catch (ArgumentException)
+                    {
+                        break; // past the last TypeDef
+                    }
+                    catch (Exception)
+                    {
+                        failed++;
+                    }
+                }
+            }
+            Console.WriteLine($"[StS2Mono] {failed} types in {assembly.GetName().Name} can't be loaded on this game version and are left out");
+            return types.ToArray();
+        }
+
+        private static string Reason(Exception exception)
+        {
+            string reason = $"{exception.GetType().Name}: {exception.Message}";
             for (Exception? inner = exception.InnerException; inner != null; inner = inner.InnerException)
                 reason += $" <- {inner.GetType().Name}: {inner.Message}";
-            Console.WriteLine($"[StS2Mono] skipped patch class {patchClass.FullName}: {reason}");
+            return reason.Length > 600 ? reason.Substring(0, 600) + "..." : reason;
         }
 
         /// <summary>Replaces HarmonyLib.AccessTools.Identifiable, which asks MonoMod.Core

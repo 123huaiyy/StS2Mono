@@ -84,6 +84,39 @@ namespace StS2Mono.HarmonyTest
         public T Get() => value;
     }
 
+    public abstract class Shape
+    {
+        private int sides;
+        protected Shape(int sides) { this.sides = sides; }
+        public int Sides => sides;
+    }
+
+    public sealed class Triangle : Shape
+    {
+        public Triangle() : base(3) { }
+    }
+
+    // The replacement is a copy of Triangle's constructor, which calls Shape's protected
+    // one, and the postfix writes Shape's private field: neither is visible to a method
+    // outside these classes, so the runtime must not check access for replacements.
+    [HarmonyPatch(typeof(Triangle), MethodType.Constructor)]
+    internal static class TrianglePatch
+    {
+        private static void Postfix(ref int ___sides) => ___sides += 10;
+    }
+
+    // Built on a library type that test-desktop.sh removes, like a mod type built on a
+    // BaseLib type the installed BaseLib lacks. Never touched directly here.
+    public class Orphan : Missing.MissingBase
+    {
+    }
+
+    internal static class FailingTranspiler
+    {
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions) =>
+            throw new InvalidOperationException("can't find the code this transpiler was made for");
+    }
+
     // A target this game build doesn't have: PatchAll must skip it and go on.
     [HarmonyPatch(typeof(Targets), "MethodFromANewerVersion")]
     internal static class MissingTargetPatch
@@ -253,7 +286,8 @@ namespace StS2Mono.HarmonyTest
         public static int Main()
         {
             bool mono = Type.GetType("Mono.RuntimeStructs") != null;
-            Console.WriteLine($"{RuntimeInformation.FrameworkDescription} on {(mono ? "Mono" : "CoreCLR")}, {RuntimeInformation.ProcessArchitecture}");
+            string generator = Environment.GetEnvironmentVariable("MONOMOD_DMDType") ?? "default";
+            Console.WriteLine($"{RuntimeInformation.FrameworkDescription} on {(mono ? "Mono" : "CoreCLR")}, {RuntimeInformation.ProcessArchitecture}, replacements made by the {generator} generator");
 
             // Made before patching: a delegate, and a method hot enough to have
             // tiered up in the interpreter.
@@ -288,6 +322,7 @@ namespace StS2Mono.HarmonyTest
             Check("override isn't patched", () => new Dog().Speak(), "woof");
             Check("struct instance method", () => new Point(1, 2).Sum(), 12);
             Check("constructor", () => new Widget(21).Size, 42);
+            Check("constructor calling a protected base constructor, private field", () => new Triangle().Sides, 13);
             Check("property getter", () => Targets.Limit, 99);
             Check("transpiler", () => Targets.Ten(), 20);
             Check("method that tiered up before patching", () => Targets.Hot(1), 1002);
@@ -302,7 +337,17 @@ namespace StS2Mono.HarmonyTest
             Check("large struct result", () => Targets.MakeBig(5).E + Targets.MakeBig(5).A, 47L);
             Check("delegate called by List.Sort", () => { var list = new List<int> { 2, 3, 1 }; list.Sort(compare); return string.Join(",", list); }, "3,2,1");
             Check("finalizer swallows the exception", () => Targets.Throws(), 0);
-            Check("patched methods known to Harmony", () => harmony.GetPatchedMethods().Count(), 18);
+            Check("patched methods known to Harmony", () => harmony.GetPatchedMethods().Count(), 19);
+            Check("types that can't load are left out, the others found", () =>
+            {
+                Type[] types = AccessTools.GetTypesFromAssembly(typeof(Program).Assembly);
+                return $"{types.Any(t => t.Name == nameof(Targets))} {types.Any(t => t.Name == "Orphan")}";
+            }, "True False");
+            Check("Harmony.Patch with a failing transpiler returns null", () => harmony.Patch(
+                AccessTools.Method(typeof(Targets), nameof(Targets.Ten)),
+                transpiler: new HarmonyMethod(typeof(FailingTranspiler), nameof(FailingTranspiler.Transpiler))) == null, true);
+            Check("failed Harmony.Patch counted", () => InterpDetour.SkippedPatches, 1);
+            Check("the method's earlier patch still works", () => Targets.Ten(), 20);
 
             harmony.UnpatchAll(harmony.Id);
             Check("unpatched static method", () => Targets.Square(3), 9);
