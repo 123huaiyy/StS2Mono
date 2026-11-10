@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -310,6 +311,19 @@ namespace StS2Mono.HarmonyTest
             Console.WriteLine(ok ? $"PASS  {name}: {value}" : $"FAIL  {name}: {value} (expected {expected})");
         }
 
+        private static bool ThrowsMissingMethod(Func<object?> call)
+        {
+            try
+            {
+                call();
+                return false;
+            }
+            catch (MissingMethodException)
+            {
+                return true;
+            }
+        }
+
         public static int Main()
         {
             bool mono = Type.GetType("Mono.RuntimeStructs") != null;
@@ -381,6 +395,21 @@ namespace StS2Mono.HarmonyTest
                 transpiler: new HarmonyMethod(typeof(FailingTranspiler), nameof(FailingTranspiler.Transpiler))) == null, true);
             Check("failed Harmony.Patch counted", () => InterpDetour.SkippedPatches, 1);
             Check("the method's earlier patch still works", () => Targets.Ten(), 20);
+
+            // A mod built against the library's first version, loaded from a mods folder: its
+            // calls to methods whose signatures changed are adapted (mono/patch-mono.ps1,
+            // transform.c, drift). The same call from here still has to match exactly.
+            string driftMod = Path.Combine(AppContext.BaseDirectory, "Documents", "mods", "DriftMod", "StS2Mono.HarmonyTest.DriftMod.dll");
+            var cases = (System.Collections.IList)Assembly.LoadFrom(driftMod)
+                .GetType("StS2Mono.HarmonyTest.DriftMod.DriftChecks", throwOnError: true)!
+                .GetMethod("All")!.Invoke(null, null)!;
+            foreach (object item in cases)
+            {
+                var (name, actual, expected) = ((string, Func<object?>, object?))item;
+                Check("mod call to a changed method: " + name, actual, expected);
+            }
+            Check("calls from outside a mods folder still need an exact match",
+                () => ThrowsMissingMethod(() => new StS2Mono.HarmonyTest.Missing.Drifted(1).Describe(4)), true);
 
             harmony.UnpatchAll(harmony.Id);
             Check("unpatched static method", () => Targets.Square(3), 9);

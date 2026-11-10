@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Stands for a mod built for an older game version: it calls HarmonyTest.Missing's
+       first version, and test-desktop.sh runs it from a Documents/mods folder against the
+       WITHOUT_TYPES version, where StS2Mono's interpreter adapts its calls. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>StS2Mono.HarmonyTest.DriftMod</AssemblyName>
+    <RootNamespace>StS2Mono.HarmonyTest.DriftMod</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../HarmonyTest.Missing/HarmonyTest.Missing.csproj" />
+  </ItemGroup>
+</Project>

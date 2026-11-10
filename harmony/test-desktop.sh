@@ -21,6 +21,12 @@ cp "$MONO_BUILD/System.Private.CoreLib.dll" "$APP/System.Private.CoreLib.dll"
 dotnet build "$ROOT/harmony/HarmonyTest.Missing/HarmonyTest.Missing.csproj" -c Release \
     -p:DefineConstants=WITHOUT_TYPES -o "$ROOT/work/harmonytest-missing" --nologo
 cp "$ROOT/work/harmonytest-missing/HarmonyTest.Missing.dll" "$APP/"
+# A mod built against the stand-in library's first version, in a mods folder, where the
+# interpreter adapts its calls to the methods the WITHOUT_TYPES build changed.
+dotnet build "$ROOT/harmony/HarmonyTest.DriftMod/HarmonyTest.DriftMod.csproj" -c Release \
+    -o "$ROOT/work/harmonytest-driftmod" --nologo
+mkdir -p "$APP/Documents/mods/DriftMod"
+cp "$ROOT/work/harmonytest-driftmod/StS2Mono.HarmonyTest.DriftMod.dll" "$APP/Documents/mods/DriftMod/"
 
 # Once for each way MonoMod can make Harmony's replacement methods: a DynamicMethod
 # (the default), or a method in a generated assembly (MethodBuilder, Cecil).

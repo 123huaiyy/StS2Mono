@@ -21,6 +21,7 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
   - `AccessTools.GetTypesFromAssembly` 在 Mono 抛普通 `TypeLoadException` 时逐个读取类型，跳过加载不了的。
   原版 Harmony 在这些地方会抛异常，模组剩下的补丁和初始化就都没了。
 - 很多模组一看到 iOS（或者 `RuntimeFeature.IsDynamicCodeCompiled` 为 false，解释器里就是这样）就认定不能打补丁，关掉自己的 Harmony 补丁。所以从 mods 文件夹加载的代码会被告知运行在安卓上：解释器编译这些代码时，把对 `Godot.OS.GetName` / `HasFeature`、`OperatingSystem.IsIOS` / `IsAndroid` 的调用换成 GodotSharp 里 `Godot.OS.StS2Mono_*` 的同名方法（需要往 GodotSharp.dll 里加上这几个方法，没有就不替换），`IsDynamicCodeCompiled` 对它们为 true。游戏本体看到的仍然是 iOS。
+- 模组是按作者手上的游戏版本编的，而游戏在版本之间会改方法签名：返回值去掉了（`MegaAnimationState.AddEmptyAnimation` 以前返回 `MegaTrackEntry`，现在不返回）、加了带默认值的参数、参数或返回类型换成了同一继承链上的类或接口、int 参数改成了枚举。以前这样的调用会抛 MissingMethodException，调用它的整个方法都跑不了。现在 mods 文件夹里的代码调用（call、callvirt、newobj）找不到的方法时，解释器会在目标类和它的基类里找一个同名、能顶替的方法，补上默认参数，丢掉多出来的返回值，或者把缺的返回值给成 null 或 0。适配在编译这段代码时完成，运行时没有额外开销；每个被适配的调用点会在日志里记一行（`StS2Mono: ... bound to ...`）。整个类型都不存在的情况补不了。
 - 解释器的内联必须关掉（桥接代码设置了 `MONO_INTERPRETER_OPTIONS=-inline`），否则被内联的方法不会经过重定向。
 - 预编译（AOT）的 System.Private.CoreLib 里的方法不能打补丁，其它程序集（游戏、GodotSharp、其它基础类库）都可以。
 
@@ -30,7 +31,7 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
 
 1. `mono/build-mono.sh` 从 dotnet/runtime v9.0.22 源码编译打过补丁的 Mono（iOS 版和用于测试的 macOS 版），结果会缓存。
 2. `harmony/build.sh` 生成 `StS2Mono.Harmony.dll` 和改写后的 `0Harmony.dll`。
-3. `harmony/test-desktop.sh` 在 macOS 上用全解释模式的 Mono 跑 `harmony/HarmonyTest`，检查各种补丁（前缀、后缀、转译器、构造函数、虚方法、结构体、委托、泛型、反向补丁、取消补丁等）。
+3. `harmony/test-desktop.sh` 在 macOS 上用全解释模式的 Mono 跑 `harmony/HarmonyTest`，检查各种补丁（前缀、后缀、转译器、构造函数、虚方法、结构体、委托、泛型、反向补丁、取消补丁等），以及从 mods 文件夹加载的旧版模组（`harmony/HarmonyTest.DriftMod`）调用改了签名的方法时的适配。
 4. `build.sh` 编译桥接代码。产物 `StS2Mono` 里有：
    - `StS2Mono.dylib`：Mono 运行时 + 预编译的 System.Private.CoreLib + 桥接代码
    - `dotnet/`：配套的 .NET 基础类库，以及 `0Harmony.dll`（改写版）和 `StS2Mono.Harmony.dll`
