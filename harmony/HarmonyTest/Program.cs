@@ -111,6 +111,19 @@ namespace StS2Mono.HarmonyTest
     {
     }
 
+    public class VirtualBase
+    {
+        public virtual void Use(Missing.MissingParam param) { }
+    }
+
+    // Overrides a method whose signature uses a type missing at run time, like a mod relic
+    // overriding BeforeSideTurnStart(ICombatState) on a game without ICombatState: the type
+    // itself loads, but building its method table fails once it's cast or instantiated.
+    public class BadOverride : VirtualBase
+    {
+        public override void Use(Missing.MissingParam param) { }
+    }
+
     internal static class FailingTranspiler
     {
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions) =>
@@ -341,8 +354,8 @@ namespace StS2Mono.HarmonyTest
             Check("types that can't load are left out, the others found", () =>
             {
                 Type[] types = AccessTools.GetTypesFromAssembly(typeof(Program).Assembly);
-                return $"{types.Any(t => t.Name == nameof(Targets))} {types.Any(t => t.Name == "Orphan")}";
-            }, "True False");
+                return $"{types.Any(t => t.Name == nameof(Targets))} {types.Any(t => t.Name == "Orphan")} {types.Any(t => t.Name == "BadOverride")}";
+            }, "True False False");
             Check("Harmony.Patch with a failing transpiler returns null", () => harmony.Patch(
                 AccessTools.Method(typeof(Targets), nameof(Targets.Ten)),
                 transpiler: new HarmonyMethod(typeof(FailingTranspiler), nameof(FailingTranspiler.Transpiler))) == null, true);

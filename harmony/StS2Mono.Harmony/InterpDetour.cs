@@ -81,38 +81,53 @@ namespace StS2Mono
         }
 
         /// <summary>Replaces HarmonyLib.AccessTools.GetTypesFromAssembly. A mod built for a newer
-        /// game has types that don't load here (their base types or interfaces are missing).
-        /// On CoreCLR, GetTypes then throws ReflectionTypeLoadException, which Harmony handles;
-        /// Mono often throws a plain TypeLoadException for the whole assembly, so the types are
-        /// then taken one by one, leaving out those that fail.</summary>
+        /// game has types that don't work here, since they use types this version lacks.
+        /// GetTypes may throw for the whole assembly (Mono often throws a plain
+        /// TypeLoadException, which Harmony doesn't handle), and the types it returns may throw
+        /// when first used. Only the types that load completely are returned.</summary>
         public static Type[] GetTypesFromAssembly(Assembly assembly)
         {
+            IEnumerable<Type?> candidates;
+            string? failure = null;
             try
             {
-                // Mono throws only the first time: afterwards GetTypes returns the
-                // placeholders of the types that failed too, so those are left out here.
-                return Array.FindAll(assembly.GetTypes(), t => !IsPlaceholder(t));
+                candidates = assembly.GetTypes();
             }
             catch (ReflectionTypeLoadException e)
             {
-                return Array.FindAll(e.Types, t => t != null)!;
+                candidates = e.Types; // CoreCLR: nulls for the types that didn't load
+                failure = Array.Find(e.LoaderExceptions, x => x != null)?.Message;
             }
             catch (Exception e)
             {
-                return GetTypesOneByOne(assembly, e);
+                candidates = ResolveTypesOneByOne(assembly);
+                failure = e.Message;
             }
+            var usable = new List<Type>();
+            int left = 0;
+            foreach (Type? type in candidates)
+            {
+                if (type != null && LoadsCompletely(type))
+                {
+                    usable.Add(type);
+                }
+                else
+                {
+                    left++;
+                    failure ??= type?.FullName;
+                }
+            }
+            if (left > 0)
+                Console.WriteLine($"[StS2Mono] {left} types in {assembly.GetName().Name} can't be loaded on this game version and are left out (first: {failure})");
+            return usable.ToArray();
         }
 
-        private const BindingFlags DeclaredMembers =
-            BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
-
-        private static Type[] GetTypesOneByOne(Assembly assembly, Exception getTypesFailure)
+        // Every TypeDef from row 2 (row 1 is <Module>) until the token is out of range; null
+        // for rows that throw.
+        private static IEnumerable<Type?> ResolveTypesOneByOne(Assembly assembly)
         {
-            var types = new List<Type>();
-            int failed = 0;
             foreach (Module module in assembly.GetModules())
             {
-                // TypeDef rows from 2 (row 1 is <Module>) until the token is out of range.
                 for (int row = 2; row < 0x00FFFFFF; row++)
                 {
                     Type? type;
@@ -126,42 +141,29 @@ namespace StS2Mono
                     }
                     catch (Exception)
                     {
-                        failed++;
-                        continue;
+                        type = null;
                     }
-                    try
-                    {
-                        // A placeholder, or a type that throws once really used, as listing
-                        // its methods does.
-                        if (type == null || IsPlaceholder(type))
-                        {
-                            failed++;
-                            continue;
-                        }
-                        type.GetMethods(DeclaredMembers);
-                        types.Add(type);
-                    }
-                    catch (Exception)
-                    {
-                        failed++;
-                    }
+                    yield return type;
                 }
             }
-            Console.WriteLine($"[StS2Mono] {failed} types in {assembly.GetName().Name} can't be loaded on this game version and are left out ({getTypesFailure.GetType().Name}: {getTypesFailure.Message})");
-            return types.ToArray();
         }
 
-        // What Mono gives for a class whose loading failed (its base class couldn't be
-        // resolved): a type with no base type that isn't an interface or System.Object.
-        private static bool IsPlaceholder(Type type)
+        private static bool LoadsCompletely(Type type)
         {
             try
             {
-                return type.BaseType == null && !type.IsInterface && type != typeof(object);
+                // Mono hands out a placeholder for a class whose loading failed: no base
+                // type, though it's not an interface or System.Object.
+                if (type.BaseType == null && !type.IsInterface && type != typeof(object))
+                    return false;
+                // A cast check makes Mono build the type's method table, which fails for a
+                // type overriding a method whose signature uses a type this version lacks.
+                _ = typeof(IDisposable).IsAssignableFrom(type);
+                return true;
             }
             catch (Exception)
             {
-                return true;
+                return false;
             }
         }
 

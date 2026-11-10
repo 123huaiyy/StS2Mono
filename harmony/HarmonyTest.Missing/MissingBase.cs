@@ -6,6 +6,11 @@ namespace StS2Mono.HarmonyTest.Missing
     public class MissingBase
     {
     }
+
+    // Like ICombatState, which mods built for newer game versions use in method signatures.
+    public class MissingParam
+    {
+    }
 #endif
 
     public static class Library
