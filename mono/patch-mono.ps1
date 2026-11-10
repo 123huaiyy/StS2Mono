@@ -186,8 +186,10 @@ Edit-Source "src/mono/mono/metadata/reflection.c" @(
 # The bridge asks for a thread dump when the main thread hangs. The dump named
 # compiled frames only and printed "<unknown>" for interpreted ones, which on iOS
 # are all of the game's and the mods' code.
+# (The leading comma keeps a single edit an array of one pair; PowerShell would
+# otherwise flatten it into two strings.)
 Edit-Source "src/mono/mono/metadata/threads.c" @(
-    @(
+    ,@(
         "${T}${T}if (frame->type == FRAME_TYPE_MANAGED)`n${T}${T}${T}method = mono_jit_info_get_method (frame->ji);",
         "${T}${T}/* StS2Mono: interpreted frames too. */`n${T}${T}if (frame->type == FRAME_TYPE_MANAGED || frame->type == FRAME_TYPE_INTERP)`n${T}${T}${T}method = frame->ji ? mono_jit_info_get_method (frame->ji) : frame->method;"
     )
