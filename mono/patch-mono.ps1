@@ -11,6 +11,7 @@ param(
 #  3. No member access checks in the interpreter (see transform.c below).
 #  4. Reading the parameters of a method whose parameter is marked as having a
 #     default value but has none no longer aborts (see reflection.c below).
+#  5. Thread dumps name interpreted frames (see threads.c below).
 # Every anchor must occur exactly once, so a changed upstream file fails loudly.
 
 $ErrorActionPreference = "Stop"
@@ -179,6 +180,16 @@ Edit-Source "src/mono/mono/metadata/reflection.c" @(
     @(
         "${T}idx = mono_method_get_index (method);`n${T}g_assert (idx != 0);`n`n${T}param_index = mono_metadata_get_method_params (image, idx, &lastp);",
         "${T}idx = mono_method_get_index (method);`n${T}/* StS2Mono: a dynamic method has no MethodDef row, so no default values to read. */`n${T}if (!idx)`n${T}${T}return;`n`n${T}param_index = mono_metadata_get_method_params (image, idx, &lastp);"
+    )
+)
+
+# The bridge asks for a thread dump when the main thread hangs. The dump named
+# compiled frames only and printed "<unknown>" for interpreted ones, which on iOS
+# are all of the game's and the mods' code.
+Edit-Source "src/mono/mono/metadata/threads.c" @(
+    @(
+        "${T}${T}if (frame->type == FRAME_TYPE_MANAGED)`n${T}${T}${T}method = mono_jit_info_get_method (frame->ji);",
+        "${T}${T}/* StS2Mono: interpreted frames too. */`n${T}${T}if (frame->type == FRAME_TYPE_MANAGED || frame->type == FRAME_TYPE_INTERP)`n${T}${T}${T}method = frame->ji ? mono_jit_info_get_method (frame->ji) : frame->method;"
     )
 )
 
