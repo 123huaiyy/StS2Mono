@@ -13,9 +13,11 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #include <dlfcn.h>
+#include <arpa/inet.h>
 #include <execinfo.h>
 #include <fcntl.h>
 #include <mach/mach.h>
+#include <mach-o/dyld.h>
 #include <os/proc.h>
 #include <pthread.h>
 #include <signal.h>
@@ -226,7 +228,73 @@ static void log_exit(void) {
     blog("process is exiting normally");
 }
 
+// Whether this process is signed with an entitlement: 1 yes, 0 no, -1 unknown. Inside
+// LiveContainer the game runs in LiveContainer's own process, so this is about how
+// LiveContainer was signed, not the game's app. SecTask has no iOS header, hence dlsym;
+// csops' entitlements blob (XML, then DER) is the fallback.
+typedef struct __SecTask *SecTaskRef;
+
+static int has_entitlement(const char *name) {
+    SecTaskRef (*create_from_self)(CFAllocatorRef) =
+        (SecTaskRef (*)(CFAllocatorRef))dlsym(RTLD_DEFAULT, "SecTaskCreateFromSelf");
+    CFTypeRef (*copy_value)(SecTaskRef, CFStringRef, CFErrorRef *) =
+        (CFTypeRef (*)(SecTaskRef, CFStringRef, CFErrorRef *))dlsym(RTLD_DEFAULT, "SecTaskCopyValueForEntitlement");
+    if (create_from_self && copy_value) {
+        SecTaskRef task = create_from_self(kCFAllocatorDefault);
+        if (task) {
+            CFStringRef key = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingUTF8);
+            CFTypeRef value = copy_value(task, key, NULL);
+            int result = value && CFGetTypeID(value) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)value);
+            if (value)
+                CFRelease(value);
+            CFRelease(key);
+            CFRelease((CFTypeRef)task);
+            return result;
+        }
+    }
+    int (*csops_fn)(pid_t, unsigned int, void *, size_t) =
+        (int (*)(pid_t, unsigned int, void *, size_t))dlsym(RTLD_DEFAULT, "csops");
+    if (!csops_fn)
+        return -1;
+    const unsigned int ops[] = {7 /* CS_OPS_ENTITLEMENTS_BLOB */, 16 /* CS_OPS_DER_ENTITLEMENTS_BLOB */};
+    for (size_t i = 0; i < sizeof ops / sizeof ops[0]; i++) {
+        uint32_t header[2] = {0, 0}; // magic, big-endian total length
+        csops_fn(getpid(), ops[i], header, sizeof header);
+        uint32_t length = ntohl(header[1]);
+        if (length <= sizeof header || length > (1 << 20))
+            continue;
+        char *blob = malloc(length);
+        if (!blob)
+            return -1;
+        if (csops_fn(getpid(), ops[i], blob, length) == 0) {
+            int found = memmem(blob, length, name, strlen(name)) != NULL;
+            free(blob);
+            return found;
+        }
+        free(blob);
+    }
+    return -1;
+}
+
+static const char *yes_no(int value) {
+    return value > 0 ? "yes" : value == 0 ? "no" : "unknown";
+}
+
+// What iOS allows this process before it ends it, and the entitlements that raise that.
+static void log_memory_limit(void) {
+    char executable[1024] = "?";
+    uint32_t size = sizeof executable;
+    _NSGetExecutablePath(executable, &size);
+    unsigned long long footprint = footprint_mb();
+    size_t left = os_proc_available_memory() >> 20;
+    blog("memory limit: about %llu MB (footprint %llu MB + %zu MB left) for %s", footprint + left, footprint, left, executable);
+    blog("entitlements of that process: increased-memory-limit %s, extended-virtual-addressing %s",
+         yes_no(has_entitlement("com.apple.developer.kernel.increased-memory-limit")),
+         yes_no(has_entitlement("com.apple.developer.kernel.extended-virtual-addressing")));
+}
+
 static void start_memory_diagnostics(void) {
+    log_memory_limit();
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
                                                       object:nil
                                                        queue:nil
