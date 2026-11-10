@@ -95,13 +95,16 @@ namespace StS2Mono
             {
                 return Array.FindAll(e.Types, t => t != null)!;
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                return GetTypesOneByOne(assembly);
+                return GetTypesOneByOne(assembly, e);
             }
         }
 
-        private static Type[] GetTypesOneByOne(Assembly assembly)
+        private const BindingFlags DeclaredMembers =
+            BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+        private static Type[] GetTypesOneByOne(Assembly assembly, Exception getTypesFailure)
         {
             var types = new List<Type>();
             int failed = 0;
@@ -110,11 +113,10 @@ namespace StS2Mono
                 // TypeDef rows from 2 (row 1 is <Module>) until the token is out of range.
                 for (int row = 2; row < 0x00FFFFFF; row++)
                 {
+                    Type? type;
                     try
                     {
-                        Type? type = module.ResolveType(0x02000000 | row);
-                        if (type != null)
-                            types.Add(type);
+                        type = module.ResolveType(0x02000000 | row);
                     }
                     catch (ArgumentException)
                     {
@@ -123,10 +125,28 @@ namespace StS2Mono
                     catch (Exception)
                     {
                         failed++;
+                        continue;
+                    }
+                    try
+                    {
+                        // Mono hands out a type whose loading failed as a placeholder: its
+                        // base type is missing, and it throws once really used, as listing
+                        // its methods does.
+                        if (type == null || (type.BaseType == null && !type.IsInterface && type != typeof(object)))
+                        {
+                            failed++;
+                            continue;
+                        }
+                        type.GetMethods(DeclaredMembers);
+                        types.Add(type);
+                    }
+                    catch (Exception)
+                    {
+                        failed++;
                     }
                 }
             }
-            Console.WriteLine($"[StS2Mono] {failed} types in {assembly.GetName().Name} can't be loaded on this game version and are left out");
+            Console.WriteLine($"[StS2Mono] {failed} types in {assembly.GetName().Name} can't be loaded on this game version and are left out ({getTypesFailure.GetType().Name}: {getTypesFailure.Message})");
             return types.ToArray();
         }
 
