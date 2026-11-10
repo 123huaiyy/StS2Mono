@@ -89,7 +89,9 @@ namespace StS2Mono
         {
             try
             {
-                return assembly.GetTypes();
+                // Mono throws only the first time: afterwards GetTypes returns the
+                // placeholders of the types that failed too, so those are left out here.
+                return Array.FindAll(assembly.GetTypes(), t => !IsPlaceholder(t));
             }
             catch (ReflectionTypeLoadException e)
             {
@@ -129,10 +131,9 @@ namespace StS2Mono
                     }
                     try
                     {
-                        // Mono hands out a type whose loading failed as a placeholder: its
-                        // base type is missing, and it throws once really used, as listing
+                        // A placeholder, or a type that throws once really used, as listing
                         // its methods does.
-                        if (type == null || (type.BaseType == null && !type.IsInterface && type != typeof(object)))
+                        if (type == null || IsPlaceholder(type))
                         {
                             failed++;
                             continue;
@@ -148,6 +149,20 @@ namespace StS2Mono
             }
             Console.WriteLine($"[StS2Mono] {failed} types in {assembly.GetName().Name} can't be loaded on this game version and are left out ({getTypesFailure.GetType().Name}: {getTypesFailure.Message})");
             return types.ToArray();
+        }
+
+        // What Mono gives for a class whose loading failed (its base class couldn't be
+        // resolved): a type with no base type that isn't an interface or System.Object.
+        private static bool IsPlaceholder(Type type)
+        {
+            try
+            {
+                return type.BaseType == null && !type.IsInterface && type != typeof(object);
+            }
+            catch (Exception)
+            {
+                return true;
+            }
         }
 
         private static string Reason(Exception exception)
