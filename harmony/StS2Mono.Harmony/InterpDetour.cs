@@ -148,6 +148,9 @@ namespace StS2Mono
             }
         }
 
+        private const BindingFlags DeclaredInstanceMembers =
+            BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
         private static bool LoadsCompletely(Type type)
         {
             try
@@ -156,9 +159,17 @@ namespace StS2Mono
                 // type, though it's not an interface or System.Object.
                 if (type.BaseType == null && !type.IsInterface && type != typeof(object))
                     return false;
-                // A cast check makes Mono build the type's method table, which fails for a
-                // type overriding a method whose signature uses a type this version lacks.
-                _ = typeof(IDisposable).IsAssignableFrom(type);
+                // Mono can't build the method table of a type with a virtual method whose
+                // signature uses a type this version lacks (a mod overriding a game method that
+                // takes a newer game's type); such a type throws once cast or instantiated.
+                foreach (MethodInfo method in type.GetMethods(DeclaredInstanceMembers))
+                {
+                    if (!method.IsVirtual)
+                        continue;
+                    _ = method.ReturnType;
+                    foreach (ParameterInfo parameter in method.GetParameters())
+                        _ = parameter.ParameterType;
+                }
                 return true;
             }
             catch (Exception)
