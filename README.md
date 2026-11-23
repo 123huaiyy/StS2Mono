@@ -53,7 +53,7 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
 - `tools/pcport/Program.cs` 将旧版兼容补丁应用到新版程序集，并接入依赖诊断和触控处理。
 - `tools/pcport-fixes/ModCompatibility.cs` 在游戏原有解析逻辑之后查找请求方同目录的托管依赖。它核对程序集身份，并将类型加载失败的内部异常写入日志。模组仍按游戏清单里的依赖版本和用户授权加载。
 - `tools/pcport-fixes/TouchInputFixes.cs` 使用 Godot 的触点坐标处理点按和拖动，让触控事件即时分发。出牌过程中双指触屏可取消当前出牌。物理鼠标和手柄仍走游戏原有处理。
-- `tools/pcport/package_ios.py` 沿用旧 IPA 的框架和图标，将新版资源及版本信息装入测试 IPA。配套的 .NET 压缩包保留经过适配的 GodotSharp 和 Mono 类库。
+- `tools/pcport/package_ios.py` 沿用旧 IPA 的框架和图标，将新版资源、版本信息和空的 iOS .NET 发布清单装入测试 IPA。清单须与桥接模块建立的缓存清单一致，Godot 才会检查外部 Mono。配套的 .NET 压缩包保留经过适配的 GodotSharp 和 Mono 类库。
 
 用 .NET 9 编译 `tools/pcport-fixes/StS2Mono.GameFixes.csproj`，传入 `-p:GameDir=<含新版 sts2.dll 和 GodotSharp.dll 的目录>`。编译 `tools/pcport/pcport.csproj` 后，以原版 `sts2.dll`、输出路径和编译产出的 `StS2Mono.GameFixes.dll` 为参数运行。用 `python tools/pcport/package_ios.py --help` 查看打包输入。
 

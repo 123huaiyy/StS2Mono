@@ -16,6 +16,7 @@ APP = "Payload/sts2.app/"
 PACK_HEADER = struct.Struct("<4s5I2Q")
 PACK_ENTRY = struct.Struct("<QQ16sI")
 VERSION = "0.113.1"
+MONO_PUBLISH_MANIFEST = ".godot/mono/publish/arm64/.dotnet-publish-manifest"
 
 
 def uint(data, offset):
@@ -88,6 +89,9 @@ def write_pack(source, destination, release_info):
     replacements = {
         "project.binary": update_project(data),
         "release_info.json": release_info,
+        # Match the empty cache manifest created by StS2Mono. The Godot iOS
+        # host only probes for Mono after it accepts this packed manifest.
+        MONO_PUBLISH_MANIFEST: b"",
     }
     added = bytearray()
     for name, data in replacements.items():
