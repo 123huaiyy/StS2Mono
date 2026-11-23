@@ -45,3 +45,16 @@ Harmony 平时靠改写方法的机器码来打补丁（MonoMod.Core），iOS �
 3. 启动游戏。日志在 `Documents/dotnet/bridge.log` 和 `Documents/dotnet/console.log`（每个 Harmony 补丁会记一行 `[StS2Mono] patched ...`）。
 4. 在 `Documents/dotnet/` 里放一个名为 `verbose` 的空文件，可以输出更详细的 Mono 日志。
 5. 想退回原来的 NativeAOT：在 `Documents/dotnet/` 里放一个名为 `DISABLE` 的空文件。
+
+## 0.113.1 iOS 测试包
+
+沿用 0.111.0 的 Godot 4.5.1 宿主、StS2Mono 和 Harmony。新包使用 `cv.o.sts2.v0113`，可与 0.111.0 并存。游戏文件由本地构建提供，GitHub Actions 仍只构建桥接模块。
+
+- `tools/pcport/Program.cs` 将旧版兼容补丁应用到新版程序集，并接入依赖诊断和触控处理。
+- `tools/pcport-fixes/ModCompatibility.cs` 在游戏原有解析逻辑之后查找请求方同目录的托管依赖。它核对程序集身份，并将类型加载失败的内部异常写入日志。模组仍按游戏清单里的依赖版本和用户授权加载。
+- `tools/pcport-fixes/TouchInputFixes.cs` 使用 Godot 的触点坐标处理点按和拖动，让触控事件即时分发。出牌过程中双指触屏可取消当前出牌。物理鼠标和手柄仍走游戏原有处理。
+- `tools/pcport/package_ios.py` 沿用旧 IPA 的框架和图标，将新版资源及版本信息装入测试 IPA。配套的 .NET 压缩包保留经过适配的 GodotSharp 和 Mono 类库。
+
+用 .NET 9 编译 `tools/pcport-fixes/StS2Mono.GameFixes.csproj`，传入 `-p:GameDir=<含新版 sts2.dll 和 GodotSharp.dll 的目录>`。编译 `tools/pcport/pcport.csproj` 后，以原版 `sts2.dll`、输出路径和编译产出的 `StS2Mono.GameFixes.dll` 为参数运行。用 `python tools/pcport/package_ios.py --help` 查看打包输入。
+
+真机测试依次验证无模组启动和战斗、点牌与点目标、拖牌与双指取消、手柄切换，再加入已知成功的模组和一个失败样本。出现错误时对照 `Documents/logs/` 的 Godot 日志和 `Documents/dotnet/` 的 `bridge.log`、`console.log`。依赖缺失、Windows 原生 DLL 和游戏 API 变更会在不同阶段出现，修复需要与具体异常对应。

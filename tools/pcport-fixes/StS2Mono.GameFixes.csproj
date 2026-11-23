@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Code the PC build's sts2.dll calls once tools/pcport has patched it. Built
+       against that sts2.dll; pass its folder as GameDir. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>StS2Mono.GameFixes</AssemblyName>
+    <RootNamespace>StS2Mono.GameFixes</RootNamespace>
+    <GameDir Condition="'$(GameDir)' == ''">..\..\work\pc-0.111.0\dotnet</GameDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="sts2">
+      <HintPath>$(GameDir)\sts2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="GodotSharp">
+      <HintPath>$(GameDir)\GodotSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
